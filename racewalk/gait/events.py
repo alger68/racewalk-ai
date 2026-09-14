@@ -33,6 +33,8 @@ TO 與 IC 之間，會被系統性低估兩倍的偏差。對一個門檻只有 
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .. import signal
 from ..types import ContactInterval, EventKind, Foot, FootTrack, GaitEvent
 
@@ -73,26 +75,38 @@ MIN_CONFIDENT_FRACTION = 0.5
 CONFIDENCE_MARGIN_FRAMES = 2
 
 
-def detect_events(
+@dataclass(frozen=True)
+class _Prepared:
+    """濾波後的軌跡與由它推出的門檻，供事件偵測與逐格接地狀態共用。"""
+
+    y: list[float]
+    valid: list[bool]
+    ground: float
+    amplitude: float
+    threshold: float
+
+
+def _prepare(
     track: FootTrack,
     fps: float,
-    cutoff_hz: float = DEFAULT_CUTOFF_HZ,
-    contact_band: float = DEFAULT_CONTACT_BAND,
-    min_contact_ms: float = MIN_CONTACT_MS,
-) -> list[GaitEvent]:
-    """偵測單腳的 IC/TO 事件，依時間排序回傳。"""
+    cutoff_hz: float,
+    contact_band: float,
+) -> _Prepared | None:
+    """共用的前處理：信心度守門、濾波、地面高度與觸地門檻。
+
+    事件偵測與 contact_mask() 必須用同一組門檻，否則「這一格算不算踩在地上」
+    在兩邊會給出不同答案，粗篩的結果就無法對應回逐次觸地的表格。
+    """
     n = len(track.y)
     if n < 8:
-        return []
-
-    dt_ms = 1000.0 / fps
+        return None
 
     # 信心度守門。比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，
     # 那些影格的關鍵點座標是垃圾。若讓它們參與地面高度與振幅的估計，
     # 整條軌跡的門檻都會跟著跑掉。
     valid = [c >= MIN_KEYPOINT_CONFIDENCE for c in track.confidence]
     if sum(valid) < n * MIN_CONFIDENT_FRACTION:
-        return []  # 可信的影格太少，這段沒有東西可以量
+        return None  # 可信的影格太少，這段沒有東西可以量
 
     y = signal.filtfilt(
         signal.interpolate_gaps(track.y, valid),
@@ -104,14 +118,61 @@ def detect_events(
     # 只取可信的影格來估地面與振幅。
     confident_y = [v for v, ok in zip(y, valid, strict=True) if ok]
     ground = signal.percentile(confident_y, 95.0)
-    swing_top = signal.percentile(confident_y, 5.0)
-    amplitude = ground - swing_top
+    amplitude = ground - signal.percentile(confident_y, 5.0)
 
     if amplitude < MIN_AMPLITUDE_PX:
-        return []  # 軌跡幾乎是平的，代表這條腳沒有被正確追蹤
+        return None  # 軌跡幾乎是平的，代表這條腳沒有被正確追蹤
 
     band = _adaptive_band(y, amplitude, contact_band)
-    threshold = ground - amplitude * band
+    return _Prepared(
+        y=y,
+        valid=valid,
+        ground=ground,
+        amplitude=amplitude,
+        threshold=ground - amplitude * band,
+    )
+
+
+def contact_mask(
+    track: FootTrack,
+    fps: float,
+    cutoff_hz: float = DEFAULT_CUTOFF_HZ,
+    contact_band: float = DEFAULT_CONTACT_BAND,
+) -> list[bool | None]:
+    """逐格回答「這隻腳在地面上嗎」。
+
+    True = 在地面，False = 離地，None = 不知道（信心度不足）。
+
+    粗篩需要的是逐格狀態而不是事件時刻：在爛畫面上，事件的精確時刻量不準，
+    但「這一格看起來雙腳都離地」這個觀察本身是穩健的，而且能推出騰空時間的
+    嚴謹上下界（見 racewalk/screen.py）。
+
+    None 不可以當成 False。把「不知道」誤讀成「離地」會憑空生出騰空。
+    """
+    prepared = _prepare(track, fps, cutoff_hz, contact_band)
+    if prepared is None:
+        return [None] * len(track.y)
+
+    return [
+        None if not ok else value >= prepared.threshold
+        for value, ok in zip(prepared.y, prepared.valid, strict=True)
+    ]
+
+
+def detect_events(
+    track: FootTrack,
+    fps: float,
+    cutoff_hz: float = DEFAULT_CUTOFF_HZ,
+    contact_band: float = DEFAULT_CONTACT_BAND,
+    min_contact_ms: float = MIN_CONTACT_MS,
+) -> list[GaitEvent]:
+    """偵測單腳的 IC/TO 事件，依時間排序回傳。"""
+    prepared = _prepare(track, fps, cutoff_hz, contact_band)
+    if prepared is None:
+        return []
+
+    dt_ms = 1000.0 / fps
+    y, valid, threshold = prepared.y, prepared.valid, prepared.threshold
 
     ic_idx = signal.crossings(y, threshold, rising=True)
     to_idx = signal.crossings(y, threshold, rising=False)

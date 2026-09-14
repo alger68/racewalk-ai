@@ -3,6 +3,7 @@
     racewalk check <video>   讀取影片並回報它能回答什麼問題
     racewalk demo            以合成軌跡跑完整條步態管線
     racewalk ablation        幀率消融實驗：量化不同幀率下的精度劣化
+    racewalk screen          可疑片段粗篩：在爛畫面上也站得住的標記
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import capability, synth
+from . import capability, screen, synth
 from .gait import events, features
 from .io.probe import ProbeError, probe
 from .types import Foot, GaitReport
@@ -157,6 +158,54 @@ def cmd_ablation(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_screen(args: argparse.Namespace) -> int:
+    """可疑片段粗篩示範。
+
+    粗篩不量精確值，改為輸出取樣界線。用不同的騰空長度與幀率跑一遍，
+    可以直接看出「什麼情況證得出來、什麼情況證不出來」。
+    """
+    print(
+        f"粗篩示範：觸地 {args.contact:g} ms、雜訊 {args.noise:g} px，"
+        f"門檻 {capability.DEFAULT_VISIBILITY_THRESHOLD_MS:g} ms\n"
+    )
+    print(f"{'騰空':>8}  {'幀率':>6}  {'標記段數':>8}  {'最強標記':<28}  判讀")
+    print("-" * 82)
+
+    for flight in (args.flight, 45.0, 90.0, 150.0):
+        for fps in (240.0, 60.0, 30.0):
+            left, right, _ = synth.synth_tracks(
+                fps=fps, contact_ms=args.contact, flight_ms=flight, noise_px=args.noise
+            )
+            report = screen.screen(left, right, fps)
+            flights = [
+                f for f in report.findings if f.signal is screen.Signal.VISIBLE_FLIGHT
+            ]
+
+            if flights:
+                best = max(flights, key=lambda f: f.score)
+                headline = best.headline
+                verdict = "證得出來"
+            else:
+                headline = "—"
+                verdict = (
+                    "未超過門檻" if flight <= capability.DEFAULT_VISIBILITY_THRESHOLD_MS
+                    else "取樣證明不了"
+                )
+
+            print(
+                f"{flight:7.0f}ms  {fps:5.0f}   {len(flights):8d}  {headline:<28}  {verdict}"
+            )
+        print()
+
+    print(
+        "粗篩只在「無論取樣落在哪裡，騰空都超過門檻」時才標記。\n"
+        "低幀率的代價是漏報而非誤報——這是刻意的取捨：誤報一次，"
+        "使用者對整個工具的信任就沒了。"
+    )
+    print(f"\n{DISCLAIMER}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="racewalk", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -177,6 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_abl.add_argument("--flight", type=float, default=30.0)
     p_abl.add_argument("--noise", type=float, default=1.0)
     p_abl.set_defaults(func=cmd_ablation)
+
+    p_screen = sub.add_parser("screen", help="可疑片段粗篩示範")
+    p_screen.add_argument("--contact", type=float, default=300.0)
+    p_screen.add_argument("--flight", type=float, default=30.0, help="第一組的騰空時間（毫秒）")
+    p_screen.add_argument("--noise", type=float, default=1.0)
+    p_screen.set_defaults(func=cmd_screen)
 
     return parser
 

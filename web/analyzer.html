@@ -118,6 +118,34 @@ td.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;w
 .verdict.inconclusive{background:var(--accent-wash);color:var(--accent)}
 .verdict.unreliable{background:var(--surface-2);color:var(--ink-3)}
 
+.findings{display:flex;flex-direction:column;gap:0;border:1px solid var(--rule);background:var(--surface)}
+.finding{
+  display:grid;grid-template-columns:52px minmax(0,1fr);gap:0 14px;
+  padding:13px 16px;border-bottom:1px solid var(--rule-soft);
+  text-align:left;font:inherit;background:none;color:inherit;
+  border-left:3px solid transparent;cursor:pointer;width:100%;
+}
+.finding:last-child{border-bottom:none}
+.finding:hover,.finding:focus-visible{background:var(--surface-2)}
+.finding.visible_flight{border-left-color:var(--danger)}
+.finding.bent_knee{border-left-color:var(--accent)}
+.finding.irregular_rhythm{border-left-color:var(--ink-3)}
+.finding .t{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;
+  color:var(--ink-2);padding-top:2px;
+}
+.finding .body{display:flex;flex-direction:column;gap:3px;min-width:0}
+.finding .head{font-size:14.5px;font-weight:700;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.finding .kindtag{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;padding:0 6px;border-radius:2px;font-weight:600;
+}
+.finding.visible_flight .kindtag{background:var(--danger-wash);color:var(--danger)}
+.finding.bent_knee .kindtag{background:var(--accent-wash);color:var(--accent)}
+.finding.irregular_rhythm .kindtag{background:var(--surface-2);color:var(--ink-3)}
+.finding .why{font-size:13px;color:var(--ink-2);line-height:1.7}
+.finding .meta{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3)}
+.clean{padding:16px;font-size:13.5px;color:var(--ink-2);line-height:1.75}
 .note{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding-block:13px;font-size:13.5px;color:var(--ink-2);line-height:1.75}
 .err{background:var(--danger-wash);border-left:3px solid var(--danger);padding:12px 16px;font-size:13.5px;line-height:1.7}
 h3{font-size:14px;margin:0;font-weight:700}
@@ -195,6 +223,14 @@ footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--rule);font-si
   <div id="resultTier" class="tierbox"></div>
 
   <dl class="tiles" id="tiles"></dl>
+
+  <h3>可疑片段 — 值得人工看一眼的地方</h3>
+  <p class="hint">
+    依優先度排序。這些不是判定，是「建議複核」的清單——點一下可以把影片
+    跳到該片段。騰空標記採用取樣界線：只在「無論取樣落在哪裡，騰空都超過
+    門檻」時才標記，所以低幀率下會漏報，但不會誤報。
+  </p>
+  <div id="screenList"></div>
 
   <h3>時間軸</h3>
   <div class="scroller"><svg id="timeline" viewBox="0 0 900 190" role="img"
@@ -501,24 +537,22 @@ const Events = {
    * 而騰空時間夾在兩者之間，會被系統性低估兩倍偏差。實測門檻 0.25 造成
    * ±11ms 偏差，0.06 則小於 1ms。
    */
-  detect(track, fps, opts = {}) {
-    const {
-      cutoffHz = DEFAULT_CUTOFF_HZ,
-      contactBand = DEFAULT_CONTACT_BAND,
-      minContactMs = MIN_CONTACT_MS,
-    } = opts;
-
+  /**
+   * 共用的前處理：信心度守門、濾波、地面高度與觸地門檻。
+   *
+   * 事件偵測與 contactMask() 必須用同一組門檻，否則「這一格算不算踩在地上」
+   * 在兩邊會給出不同答案。
+   */
+  _prepare(track, fps, cutoffHz = DEFAULT_CUTOFF_HZ, contactBand = DEFAULT_CONTACT_BAND) {
     const n = track.y.length;
-    if (n < 8) return [];
-
-    const dtMs = 1000 / fps;
+    if (n < 8) return null;
 
     // 信心度守門。比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，
     // 那些影格的關鍵點座標是垃圾。若讓它們參與地面高度與振幅的估計，
     // 整條軌跡的門檻都會跟著跑掉。
     const confs = track.confidence ?? new Array(n).fill(1);
     const valid = confs.map((c) => c >= MIN_KEYPOINT_CONFIDENCE);
-    if (valid.filter(Boolean).length < n * MIN_CONFIDENT_FRACTION) return [];
+    if (valid.filter(Boolean).length < n * MIN_CONFIDENT_FRACTION) return null;
 
     const y = Signal.filtfilt(
       Signal.interpolateGaps(track.y, valid),
@@ -530,10 +564,32 @@ const Events = {
     const confidentY = y.filter((_, i) => valid[i]);
     const ground = Signal.percentile(confidentY, 95);
     const amplitude = ground - Signal.percentile(confidentY, 5);
-    if (amplitude < MIN_AMPLITUDE_PX) return [];
+    if (amplitude < MIN_AMPLITUDE_PX) return null;
 
     const band = Events.adaptiveBand(y, amplitude, contactBand);
-    const threshold = ground - amplitude * band;
+    return { y, valid, ground, amplitude, threshold: ground - amplitude * band };
+  },
+
+  /**
+   * 逐格回答「這隻腳在地面上嗎」。true = 在地面，false = 離地，null = 不知道。
+   *
+   * null 不可以當成 false。把「不知道」誤讀成「離地」會憑空生出騰空。
+   */
+  contactMask(track, fps, opts = {}) {
+    const prepared = Events._prepare(track, fps, opts.cutoffHz, opts.contactBand);
+    if (!prepared) return new Array(track.y.length).fill(null);
+    return prepared.y.map((v, i) => (prepared.valid[i] ? v >= prepared.threshold : null));
+  },
+
+  detect(track, fps, opts = {}) {
+    const { cutoffHz = DEFAULT_CUTOFF_HZ, contactBand = DEFAULT_CONTACT_BAND,
+            minContactMs = MIN_CONTACT_MS } = opts;
+
+    const prepared = Events._prepare(track, fps, cutoffHz, contactBand);
+    if (!prepared) return [];
+
+    const dtMs = 1000 / fps;
+    const { y, valid, threshold } = prepared;
 
     const velocity = Signal.derivative(y, dtMs / 1000);
     const conf = (idx) => Events._confidence(track, velocity, idx);
@@ -844,6 +900,216 @@ const Synth = {
   },
 };
 
+// ---------------------------------------------------------------- Screen
+//
+// 可疑片段粗篩。移植自 racewalk/screen.py，行為必須逐數值一致。
+//
+// 粗篩回答的問題和精確量測不同：不是「騰空幾毫秒」，而是「哪幾秒鐘值得
+// 人親自看一眼」。核心手法是界線而非估計——若觀察到連續 k 格雙腳都離地，
+// 取樣間隔 Δ，且前後各有一格確定踩地，則騰空時間必然落在
+// ((k-1)·Δ, (k+1)·Δ)。這是取樣推出的邏輯界線，任何幀率下都成立。
+
+const DEFAULT_KNEE_THRESHOLD_DEG = 168;
+const KNEE_SCORE_SPAN_DEG = 12;
+const RHYTHM_MAD_THRESHOLD = 3;
+const LOW_COVERAGE_FRACTION = 0.7;
+
+const Screen = {
+  /**
+   * 由「連續幾格雙腳離地」推出騰空時間的上下界（毫秒）。
+   * k=1 時下界為 0——只看到一格，什麼都證明不了。
+   */
+  flightBounds(airborneFrames, fps) {
+    if (airborneFrames < 1) throw new RangeError("離地影格數必須至少為 1");
+    const dtMs = 1000 / fps;
+    return [(airborneFrames - 1) * dtMs, (airborneFrames + 1) * dtMs];
+  },
+
+  /**
+   * 找出雙腳皆「確定」離地的連續區段，且前後各有一格確定踩地。
+   * 任一腳為 null（不知道）就中斷——把不知道當成離地會憑空生出騰空。
+   */
+  airborneRuns(left, right) {
+    const n = Math.min(left.length, right.length);
+    const runs = [];
+    let i = 0;
+
+    while (i < n) {
+      if (!(left[i] === false && right[i] === false)) { i += 1; continue; }
+      const start = i;
+      while (i < n && left[i] === false && right[i] === false) i += 1;
+      const end = i;
+
+      const beforeOk = start > 0 && (left[start - 1] === true || right[start - 1] === true);
+      const afterOk = end < n && (left[end] === true || right[end] === true);
+      if (beforeOk && afterOk) runs.push([start, end]);
+    }
+    return runs;
+  },
+
+  _windowQuality(left, right, startIdx, endIdx) {
+    const lo = Math.max(0, startIdx);
+    const hi = Math.min(left.confidence.length, endIdx + 1);
+    if (hi <= lo) return 0;
+    const values = [...left.confidence.slice(lo, hi), ...right.confidence.slice(lo, hi)];
+    return values.reduce((s, v) => s + v, 0) / values.length;
+  },
+
+  /**
+   * 標出「可以斷言騰空超過門檻」的片段。
+   * 只在下界超過門檻時標記——這種陳述不依賴任何精度假設。
+   */
+  flights(left, right, fps, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+    const leftMask = Events.contactMask(left, fps);
+    const rightMask = Events.contactMask(right, fps);
+    const dtMs = 1000 / fps;
+    const findings = [];
+
+    for (const [start, end] of Screen.airborneRuns(leftMask, rightMask)) {
+      const k = end - start;
+      const [lower, upper] = Screen.flightBounds(k, fps);
+      if (lower <= thresholdMs) continue;
+
+      findings.push({
+        signal: "visible_flight",
+        startMs: start * dtMs,
+        endMs: end * dtMs,
+        score: Math.min(1, (lower - thresholdMs) / thresholdMs),
+        quality: Screen._windowQuality(left, right, start, end),
+        headline: `騰空至少 ${lower.toFixed(0)} ms`,
+        detail:
+          `連續 ${k} 格觀察到雙腳皆離地。取樣間隔 ${dtMs.toFixed(1)} ms，` +
+          `因此騰空時間必定介於 ${lower.toFixed(0)}–${upper.toFixed(0)} ms 之間，` +
+          `下界已超過 ${thresholdMs.toFixed(0)} ms 門檻。`,
+        metrics: { airborneFrames: k, lowerMs: lower, upperMs: upper },
+      });
+    }
+    return findings;
+  },
+
+  /** 標出支撐期膝角明顯彎曲的觸地。膝角是幾何量，低幀率下仍然可用。 */
+  knee(contacts, joints, fps, left, right, kneeThresholdDeg = DEFAULT_KNEE_THRESHOLD_DEG) {
+    const dtMs = 1000 / fps;
+    const findings = [];
+
+    for (const contact of contacts) {
+      const legs = joints[contact.foot];
+      if (!legs) continue;
+      const { hip, knee, ankle } = legs;
+
+      const startIdx = Math.round(contact.startMs / dtMs);
+      const supportIdx = Features.verticalSupportIndex(hip, ankle, startIdx);
+      const endIdx = supportIdx ?? Math.round(contact.endMs / dtMs);
+
+      const angle = Features.minKneeAngleDuringSupport(hip, knee, ankle, startIdx, endIdx);
+      if (angle === null || angle >= kneeThresholdDeg) continue;
+
+      findings.push({
+        signal: "bent_knee",
+        startMs: contact.startMs,
+        endMs: Math.min(contact.endMs, endIdx * dtMs),
+        score: Math.min(1, (kneeThresholdDeg - angle) / KNEE_SCORE_SPAN_DEG),
+        quality: Screen._windowQuality(left, right, startIdx, endIdx),
+        headline: `${contact.foot} 腳支撐期最小膝角 ${angle.toFixed(0)}°`,
+        detail:
+          `觸地到通過垂直支撐位置期間，膝關節最小角度 ${angle.toFixed(1)}°，` +
+          `低於 ${kneeThresholdDeg.toFixed(0)}° 的檢視門檻。` +
+          `注意非矢狀面拍攝會讓角度偏小，請以影片複核。`,
+        metrics: { minKneeAngleDeg: angle },
+      });
+    }
+    return findings;
+  },
+
+  /** 標出觸地時間明顯偏離該選手自身節奏的步伐（相對比較，對拍攝條件不敏感）。 */
+  rhythm(contacts, left, right, fps, madThreshold = RHYTHM_MAD_THRESHOLD) {
+    if (contacts.length < 5) return [];
+
+    const dtMs = 1000 / fps;
+    const median = (arr) => {
+      const s = [...arr].sort((a, b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+
+    const med = median(contacts.map((c) => c.durationMs));
+    const mad = median(contacts.map((c) => Math.abs(c.durationMs - med)));
+    if (mad <= 0) return [];
+
+    const findings = [];
+    for (const contact of contacts) {
+      const z = Math.abs(contact.durationMs - med) / mad;
+      if (z < madThreshold) continue;
+
+      findings.push({
+        signal: "irregular_rhythm",
+        startMs: contact.startMs,
+        endMs: contact.endMs,
+        score: Math.min(1, (z - madThreshold) / madThreshold),
+        quality: Screen._windowQuality(
+          left, right, Math.round(contact.startMs / dtMs), Math.round(contact.endMs / dtMs)
+        ),
+        headline: `${contact.foot} 腳觸地 ${contact.durationMs.toFixed(0)} ms，偏離節奏`,
+        detail:
+          `這一步的觸地時間與該選手中位數 ${med.toFixed(0)} ms 相差 ` +
+          `${Math.abs(contact.durationMs - med).toFixed(0)} ms（${z.toFixed(1)} 倍 MAD）。` +
+          `節奏斷裂本身不是犯規，但常伴隨犯規出現。`,
+        metrics: { contactMs: contact.durationMs, medianMs: med, z },
+      });
+    }
+    return findings;
+  },
+
+  coverage(left, right, fps) {
+    const masks = [...Events.contactMask(left, fps), ...Events.contactMask(right, fps)];
+    if (!masks.length) return 0;
+    return masks.filter((m) => m !== null).length / masks.length;
+  },
+
+  /** 跑完所有粗篩訊號，依 score × quality 排序。 */
+  run(left, right, fps, { contacts = null, joints = null,
+                          thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS,
+                          kneeThresholdDeg = DEFAULT_KNEE_THRESHOLD_DEG } = {}) {
+    const cap = Capability.assess(fps);
+    let findings = Screen.flights(left, right, fps, thresholdMs);
+
+    if (contacts && contacts.length) {
+      findings = findings.concat(Screen.rhythm(contacts, left, right, fps));
+      if (joints) {
+        findings = findings.concat(
+          Screen.knee(contacts, joints, fps, left, right, kneeThresholdDeg)
+        );
+      }
+    }
+
+    // 訊號再強，資料不可信就不該排前面
+    const priority = (f) => f.score * f.quality;
+    findings.sort((a, b) => priority(b) - priority(a));
+
+    const coverage = Screen.coverage(left, right, fps);
+    const notes = [];
+
+    if (coverage < LOW_COVERAGE_FRACTION) {
+      notes.push(
+        `只有 ${(coverage * 100).toFixed(0)}% 的影格可信，其餘多半是遮擋。` +
+        `粗篩只在可信的片段上進行，沒被標記不代表沒有問題——也可能只是那段看不到。`
+      );
+    }
+    if (!cap.flightTimeReliable) {
+      notes.push(
+        `${formatNum(fps)} fps 無法量出精確的騰空時間，騰空標記改用取樣界線：` +
+        `只在「無論取樣落在哪裡，騰空都超過 ${thresholdMs.toFixed(0)} ms」時才標記。` +
+        `靈敏度因此偏低——小幅度的騰空在這個幀率下無法分辨。`
+      );
+    }
+    if (!findings.length) {
+      notes.push("沒有片段達到標記門檻。這代表沒有明顯到能被證明的問題，不代表完全合規。");
+    }
+
+    return { fps, findings, coverage, notes };
+  },
+};
+
 // ------------------------------------------------------------- 管線入口
 
 /** 由左右腳軌跡跑完 N6 → N7，回傳完整報告。 */
@@ -877,7 +1143,7 @@ const LM = {
 // 這是刻意提供的介面，讓自動化測試能驗證頁面內的實作與 Python 一致，
 // 也方便想自己寫分析腳本的人在 console 直接呼叫。
 window.racewalk = {
-  Signal, Capability, Events, Features, Synth, analyseTracks, render,
+  Signal, Capability, Events, Features, Synth, Screen, analyseTracks, render,
   MIN_KEYPOINT_CONFIDENCE, MIN_CONFIDENT_FRACTION,
   DEFAULT_VISIBILITY_THRESHOLD_MS,
 };
@@ -1127,7 +1393,11 @@ $("run").addEventListener("click", async () => {
     });
 
     const report = analyseTracks(data.left, data.right, fps);
-    render(report, data, fps);
+    const screenReport = Screen.run(data.left, data.right, fps, {
+      contacts: report.contacts,
+      joints: data.joints,
+    });
+    render(report, data, fps, screenReport);
     $("results").hidden = false;
   } catch (e) {
     showError(
@@ -1142,7 +1412,7 @@ $("run").addEventListener("click", async () => {
 
 // ---------------------------------------------------------------- 呈現
 
-function render(report, data, fps) {
+function render(report, data, fps, screenReport) {
   const cap = Capability.assess(fps);
   const box = $("resultTier");
   box.className = `tierbox ${cap.tier}`;
@@ -1155,22 +1425,39 @@ function render(report, data, fps) {
     ? report.flights.reduce((s, f) => s + f.durationMs, 0) / report.flights.length
     : null;
 
+  // 幀率不足時，「騰空時間」這個量本身量不出來——但粗篩仍能用取樣界線
+  // 斷言「至少多久」。這兩件事不同，欄位要說清楚，否則上面寫「—」、
+  // 下面寫「騰空至少 67 ms」，看起來像自相矛盾。
+  const flightCell = cap.flightTimeReliable
+    ? [
+        ["騰空次數", report.flights.length, ""],
+        ["平均騰空", flightAvg === null ? "—" : flightAvg.toFixed(1), "ms"],
+      ]
+    : [["騰空時間", "不可量測", "", "幀率不足，改見下方粗篩的取樣界線"]];
+
   const tiles = [
     ["觸地次數", report.contacts.length, ""],
     ["平均觸地", contactAvg === null ? "—" : contactAvg.toFixed(1), "ms"],
-    ["騰空次數", cap.flightTimeReliable ? report.flights.length : "—", ""],
-    ["平均騰空", cap.flightTimeReliable && flightAvg !== null ? flightAvg.toFixed(1) : "—", "ms"],
+    ...flightCell,
     ["步頻", report.cadenceSpm === null ? "—" : report.cadenceSpm.toFixed(0), "步/分"],
   ];
   $("tiles").innerHTML = tiles
-    .map(([k, v, unit]) => `<div class="tile"><dt>${k}</dt><dd>${v}${unit ? ` <small>${unit}</small>` : ""}</dd></div>`)
+    .map(([k, v, unit, footnote]) => {
+      const value = typeof v === "number" || /^[\d.]+$/.test(String(v))
+        ? `${v}${unit ? ` <small>${unit}</small>` : ""}`
+        : `<span style="font-size:15px">${v}</span>`;
+      return `<div class="tile"><dt>${k}</dt><dd>${value}</dd>` +
+        (footnote ? `<div class="meta" style="font-size:11px;color:var(--ink-3)">${footnote}</div>` : "") +
+        `</div>`;
+    })
     .join("");
 
+  renderScreen(screenReport);
   drawTimeline(report, cap);
   renderFlights(report, cap);
   renderContacts(report, data, fps);
 
-  const notes = [...report.notes];
+  const notes = [...report.notes, ...(screenReport?.notes ?? [])];
   const expected = Math.floor((parseFloat($("dur").value) || 0) * fps);
   if (data.distinctTimes.size < expected * 0.9 && expected > 0) {
     notes.push(
@@ -1205,6 +1492,54 @@ function render(report, data, fps) {
     );
   }
   $("notes").innerHTML = notes.map((n) => `<div class="note">${n}</div>`).join("");
+}
+
+const KIND_LABEL = {
+  visible_flight: "騰空",
+  bent_knee: "彎膝",
+  irregular_rhythm: "節奏",
+};
+
+function renderScreen(screenReport) {
+  const box = $("screenList");
+  if (!screenReport || !screenReport.findings.length) {
+    box.innerHTML =
+      `<div class="findings"><div class="clean">` +
+      `沒有片段達到標記門檻。<strong>這不等於合規</strong>——只代表沒有明顯到` +
+      `能被這段畫面證明的問題。遮擋、機位、幀率都會讓真正的問題落在偵測範圍外。` +
+      `</div></div>`;
+    return;
+  }
+
+  const rows = screenReport.findings.map((f, i) => {
+    const seconds = (f.startMs / 1000).toFixed(2);
+    return `
+      <button type="button" class="finding ${f.signal}" data-seek="${f.startMs / 1000}">
+        <div class="t">${seconds}s</div>
+        <div class="body">
+          <div class="head">
+            <span class="kindtag">${KIND_LABEL[f.signal] ?? f.signal}</span>
+            <span>${f.headline}</span>
+          </div>
+          <div class="why">${f.detail}</div>
+          <div class="meta">
+            強度 ${(f.score * 100).toFixed(0)}% · 資料可信度 ${(f.quality * 100).toFixed(0)}%
+            · 第 ${i + 1} 順位
+          </div>
+        </div>
+      </button>`;
+  }).join("");
+
+  box.innerHTML = `<div class="findings">${rows}</div>`;
+
+  // 點一下把影片跳到該片段，讓複核者可以直接看畫面
+  for (const el of box.querySelectorAll("[data-seek]")) {
+    el.addEventListener("click", () => {
+      const offset = parseFloat($("start").value) || 0;
+      video.currentTime = offset + parseFloat(el.dataset.seek);
+      video.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }
 }
 
 function drawTimeline(report, cap) {

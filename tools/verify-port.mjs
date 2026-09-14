@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Capability, Events, Features } from "../web/racewalk-core.js";
+import { Capability, Events, Features, Screen } from "../web/racewalk-core.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -36,7 +36,11 @@ function analyse(caseData) {
   ].sort((a, b) => a.startMs - b.startMs);
 
   const cap = Capability.assess(fps);
-  return { cap, report: Features.buildReport(fps, contacts, cap) };
+  return {
+    cap,
+    report: Features.buildReport(fps, contacts, cap),
+    screen: Screen.run(left, right, fps, { contacts }),
+  };
 }
 
 let failures = 0;
@@ -50,7 +54,7 @@ const { cases } = JSON.parse(readFileSync(join(here, "port-fixtures.json"), "utf
 for (const caseData of cases) {
   const label =
     `fps=${caseData.fps} noise=${caseData.noise_px}px` + (caseData.occluded ? " +遮擋" : "");
-  const { cap, report } = analyse(caseData);
+  const { cap, report, screen } = analyse(caseData);
   const want = caseData.expected;
 
   if (cap.tier !== want.tier) {
@@ -115,10 +119,40 @@ for (const caseData of cases) {
     fail(label, `步頻 ${gotCadence} ≠ ${expCadence}`);
   }
 
+  // 粗篩
+  const wantScreen = want.screen;
+  if (Math.abs(screen.coverage - wantScreen.coverage) > 1e-9) {
+    fail(label, `粗篩覆蓋率 ${screen.coverage} ≠ ${wantScreen.coverage}`);
+  }
+  if (screen.findings.length !== wantScreen.findings.length) {
+    fail(label, `粗篩標記數 ${screen.findings.length} ≠ ${wantScreen.findings.length}`);
+    continue;
+  }
+  let worstScreen = 0;
+  for (let i = 0; i < wantScreen.findings.length; i++) {
+    const got = screen.findings[i];
+    const exp = wantScreen.findings[i];
+    if (got.signal !== exp.signal) {
+      fail(label, `第 ${i} 個標記類型 ${got.signal} ≠ ${exp.signal}`);
+      break;
+    }
+    worstScreen = Math.max(
+      worstScreen,
+      Math.abs(got.startMs - exp.start_ms),
+      Math.abs(got.endMs - exp.end_ms),
+      Math.abs(got.score - exp.score),
+      Math.abs(got.quality - exp.quality)
+    );
+  }
+  if (worstScreen > TOL_MS) {
+    fail(label, `粗篩最大差異 ${worstScreen.toExponential(2)} 超過容許值`);
+  }
+
   if (!failures) {
     console.log(
-      `  ✓ ${label.padEnd(24)} 觸地 ${report.contacts.length}、騰空 ${report.flights.length}、` +
-        `最大差異 ${Math.max(worstContact, worstFlight).toExponential(2)} ms`
+      `  ✓ ${label.padEnd(26)} 觸地 ${report.contacts.length}、騰空 ${report.flights.length}、` +
+        `粗篩 ${screen.findings.length}、` +
+        `最大差異 ${Math.max(worstContact, worstFlight, worstScreen).toExponential(2)}`
     );
   }
 }

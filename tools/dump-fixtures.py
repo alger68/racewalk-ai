@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from racewalk import capability, synth  # noqa: E402
+from racewalk import capability, screen, synth  # noqa: E402
 from racewalk.gait import events, features  # noqa: E402
 from racewalk.types import Foot  # noqa: E402
 
@@ -32,11 +32,16 @@ CASES = [
     {"fps": 240.0, "noise_px": 1.0, "occlude": (700.0, 950.0, 500.0)},
     {"fps": 240.0, "noise_px": 1.0, "occlude": (1100.0, 1250.0, 380.0)},
     {"fps": 120.0, "noise_px": 1.0, "occlude": (900.0, 1400.0, 500.0)},
+    # 明顯騰空：讓粗篩產生標記，否則 screen 的比對永遠是空清單
+    {"fps": 240.0, "noise_px": 1.0, "flight_ms": 90.0},
+    {"fps": 30.0, "noise_px": 1.0, "flight_ms": 120.0},
 ]
 
 
-def run_case(fps: float, noise_px: float, occlude: tuple | None = None) -> dict:
-    left, right, truth = synth.synth_tracks(fps=fps, noise_px=noise_px)
+def run_case(
+    fps: float, noise_px: float, occlude: tuple | None = None, flight_ms: float = 30.0
+) -> dict:
+    left, right, truth = synth.synth_tracks(fps=fps, noise_px=noise_px, flight_ms=flight_ms)
 
     if occlude is not None:
         start_ms, end_ms, y_value = occlude
@@ -51,6 +56,7 @@ def run_case(fps: float, noise_px: float, occlude: tuple | None = None) -> dict:
 
     cap = capability.assess(fps)
     report = features.build_report(fps, contacts, cap)
+    screen_report = screen.screen(left, right, fps, contacts=contacts)
 
     return {
         "fps": fps,
@@ -79,6 +85,20 @@ def run_case(fps: float, noise_px: float, occlude: tuple | None = None) -> dict:
                 for f in report.flights
             ],
             "cadence_spm": report.cadence_spm,
+            # 粗篩：沒有這一段，screen.py 的移植在比對中不會被執行到
+            "screen": {
+                "coverage": screen_report.coverage,
+                "findings": [
+                    {
+                        "signal": f.signal.value,
+                        "start_ms": f.start_ms,
+                        "end_ms": f.end_ms,
+                        "score": f.score,
+                        "quality": f.quality,
+                    }
+                    for f in screen_report.findings
+                ],
+            },
         },
     }
 

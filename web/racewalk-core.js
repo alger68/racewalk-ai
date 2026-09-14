@@ -271,24 +271,22 @@ export const Events = {
    * 而騰空時間夾在兩者之間，會被系統性低估兩倍偏差。實測門檻 0.25 造成
    * ±11ms 偏差，0.06 則小於 1ms。
    */
-  detect(track, fps, opts = {}) {
-    const {
-      cutoffHz = DEFAULT_CUTOFF_HZ,
-      contactBand = DEFAULT_CONTACT_BAND,
-      minContactMs = MIN_CONTACT_MS,
-    } = opts;
-
+  /**
+   * 共用的前處理：信心度守門、濾波、地面高度與觸地門檻。
+   *
+   * 事件偵測與 contactMask() 必須用同一組門檻，否則「這一格算不算踩在地上」
+   * 在兩邊會給出不同答案。
+   */
+  _prepare(track, fps, cutoffHz = DEFAULT_CUTOFF_HZ, contactBand = DEFAULT_CONTACT_BAND) {
     const n = track.y.length;
-    if (n < 8) return [];
-
-    const dtMs = 1000 / fps;
+    if (n < 8) return null;
 
     // 信心度守門。比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，
     // 那些影格的關鍵點座標是垃圾。若讓它們參與地面高度與振幅的估計，
     // 整條軌跡的門檻都會跟著跑掉。
     const confs = track.confidence ?? new Array(n).fill(1);
     const valid = confs.map((c) => c >= MIN_KEYPOINT_CONFIDENCE);
-    if (valid.filter(Boolean).length < n * MIN_CONFIDENT_FRACTION) return [];
+    if (valid.filter(Boolean).length < n * MIN_CONFIDENT_FRACTION) return null;
 
     const y = Signal.filtfilt(
       Signal.interpolateGaps(track.y, valid),
@@ -300,10 +298,32 @@ export const Events = {
     const confidentY = y.filter((_, i) => valid[i]);
     const ground = Signal.percentile(confidentY, 95);
     const amplitude = ground - Signal.percentile(confidentY, 5);
-    if (amplitude < MIN_AMPLITUDE_PX) return [];
+    if (amplitude < MIN_AMPLITUDE_PX) return null;
 
     const band = Events.adaptiveBand(y, amplitude, contactBand);
-    const threshold = ground - amplitude * band;
+    return { y, valid, ground, amplitude, threshold: ground - amplitude * band };
+  },
+
+  /**
+   * 逐格回答「這隻腳在地面上嗎」。true = 在地面，false = 離地，null = 不知道。
+   *
+   * null 不可以當成 false。把「不知道」誤讀成「離地」會憑空生出騰空。
+   */
+  contactMask(track, fps, opts = {}) {
+    const prepared = Events._prepare(track, fps, opts.cutoffHz, opts.contactBand);
+    if (!prepared) return new Array(track.y.length).fill(null);
+    return prepared.y.map((v, i) => (prepared.valid[i] ? v >= prepared.threshold : null));
+  },
+
+  detect(track, fps, opts = {}) {
+    const { cutoffHz = DEFAULT_CUTOFF_HZ, contactBand = DEFAULT_CONTACT_BAND,
+            minContactMs = MIN_CONTACT_MS } = opts;
+
+    const prepared = Events._prepare(track, fps, cutoffHz, contactBand);
+    if (!prepared) return [];
+
+    const dtMs = 1000 / fps;
+    const { y, valid, threshold } = prepared;
 
     const velocity = Signal.derivative(y, dtMs / 1000);
     const conf = (idx) => Events._confidence(track, velocity, idx);
@@ -611,6 +631,216 @@ export const Synth = {
     ].sort((a, b) => a.startMs - b.startMs);
 
     return { left: trajectory(left, "L"), right: trajectory(right, "R"), truth };
+  },
+};
+
+// ---------------------------------------------------------------- Screen
+//
+// 可疑片段粗篩。移植自 racewalk/screen.py，行為必須逐數值一致。
+//
+// 粗篩回答的問題和精確量測不同：不是「騰空幾毫秒」，而是「哪幾秒鐘值得
+// 人親自看一眼」。核心手法是界線而非估計——若觀察到連續 k 格雙腳都離地，
+// 取樣間隔 Δ，且前後各有一格確定踩地，則騰空時間必然落在
+// ((k-1)·Δ, (k+1)·Δ)。這是取樣推出的邏輯界線，任何幀率下都成立。
+
+export const DEFAULT_KNEE_THRESHOLD_DEG = 168;
+export const KNEE_SCORE_SPAN_DEG = 12;
+export const RHYTHM_MAD_THRESHOLD = 3;
+export const LOW_COVERAGE_FRACTION = 0.7;
+
+export const Screen = {
+  /**
+   * 由「連續幾格雙腳離地」推出騰空時間的上下界（毫秒）。
+   * k=1 時下界為 0——只看到一格，什麼都證明不了。
+   */
+  flightBounds(airborneFrames, fps) {
+    if (airborneFrames < 1) throw new RangeError("離地影格數必須至少為 1");
+    const dtMs = 1000 / fps;
+    return [(airborneFrames - 1) * dtMs, (airborneFrames + 1) * dtMs];
+  },
+
+  /**
+   * 找出雙腳皆「確定」離地的連續區段，且前後各有一格確定踩地。
+   * 任一腳為 null（不知道）就中斷——把不知道當成離地會憑空生出騰空。
+   */
+  airborneRuns(left, right) {
+    const n = Math.min(left.length, right.length);
+    const runs = [];
+    let i = 0;
+
+    while (i < n) {
+      if (!(left[i] === false && right[i] === false)) { i += 1; continue; }
+      const start = i;
+      while (i < n && left[i] === false && right[i] === false) i += 1;
+      const end = i;
+
+      const beforeOk = start > 0 && (left[start - 1] === true || right[start - 1] === true);
+      const afterOk = end < n && (left[end] === true || right[end] === true);
+      if (beforeOk && afterOk) runs.push([start, end]);
+    }
+    return runs;
+  },
+
+  _windowQuality(left, right, startIdx, endIdx) {
+    const lo = Math.max(0, startIdx);
+    const hi = Math.min(left.confidence.length, endIdx + 1);
+    if (hi <= lo) return 0;
+    const values = [...left.confidence.slice(lo, hi), ...right.confidence.slice(lo, hi)];
+    return values.reduce((s, v) => s + v, 0) / values.length;
+  },
+
+  /**
+   * 標出「可以斷言騰空超過門檻」的片段。
+   * 只在下界超過門檻時標記——這種陳述不依賴任何精度假設。
+   */
+  flights(left, right, fps, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+    const leftMask = Events.contactMask(left, fps);
+    const rightMask = Events.contactMask(right, fps);
+    const dtMs = 1000 / fps;
+    const findings = [];
+
+    for (const [start, end] of Screen.airborneRuns(leftMask, rightMask)) {
+      const k = end - start;
+      const [lower, upper] = Screen.flightBounds(k, fps);
+      if (lower <= thresholdMs) continue;
+
+      findings.push({
+        signal: "visible_flight",
+        startMs: start * dtMs,
+        endMs: end * dtMs,
+        score: Math.min(1, (lower - thresholdMs) / thresholdMs),
+        quality: Screen._windowQuality(left, right, start, end),
+        headline: `騰空至少 ${lower.toFixed(0)} ms`,
+        detail:
+          `連續 ${k} 格觀察到雙腳皆離地。取樣間隔 ${dtMs.toFixed(1)} ms，` +
+          `因此騰空時間必定介於 ${lower.toFixed(0)}–${upper.toFixed(0)} ms 之間，` +
+          `下界已超過 ${thresholdMs.toFixed(0)} ms 門檻。`,
+        metrics: { airborneFrames: k, lowerMs: lower, upperMs: upper },
+      });
+    }
+    return findings;
+  },
+
+  /** 標出支撐期膝角明顯彎曲的觸地。膝角是幾何量，低幀率下仍然可用。 */
+  knee(contacts, joints, fps, left, right, kneeThresholdDeg = DEFAULT_KNEE_THRESHOLD_DEG) {
+    const dtMs = 1000 / fps;
+    const findings = [];
+
+    for (const contact of contacts) {
+      const legs = joints[contact.foot];
+      if (!legs) continue;
+      const { hip, knee, ankle } = legs;
+
+      const startIdx = Math.round(contact.startMs / dtMs);
+      const supportIdx = Features.verticalSupportIndex(hip, ankle, startIdx);
+      const endIdx = supportIdx ?? Math.round(contact.endMs / dtMs);
+
+      const angle = Features.minKneeAngleDuringSupport(hip, knee, ankle, startIdx, endIdx);
+      if (angle === null || angle >= kneeThresholdDeg) continue;
+
+      findings.push({
+        signal: "bent_knee",
+        startMs: contact.startMs,
+        endMs: Math.min(contact.endMs, endIdx * dtMs),
+        score: Math.min(1, (kneeThresholdDeg - angle) / KNEE_SCORE_SPAN_DEG),
+        quality: Screen._windowQuality(left, right, startIdx, endIdx),
+        headline: `${contact.foot} 腳支撐期最小膝角 ${angle.toFixed(0)}°`,
+        detail:
+          `觸地到通過垂直支撐位置期間，膝關節最小角度 ${angle.toFixed(1)}°，` +
+          `低於 ${kneeThresholdDeg.toFixed(0)}° 的檢視門檻。` +
+          `注意非矢狀面拍攝會讓角度偏小，請以影片複核。`,
+        metrics: { minKneeAngleDeg: angle },
+      });
+    }
+    return findings;
+  },
+
+  /** 標出觸地時間明顯偏離該選手自身節奏的步伐（相對比較，對拍攝條件不敏感）。 */
+  rhythm(contacts, left, right, fps, madThreshold = RHYTHM_MAD_THRESHOLD) {
+    if (contacts.length < 5) return [];
+
+    const dtMs = 1000 / fps;
+    const median = (arr) => {
+      const s = [...arr].sort((a, b) => a - b);
+      const m = Math.floor(s.length / 2);
+      return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+    };
+
+    const med = median(contacts.map((c) => c.durationMs));
+    const mad = median(contacts.map((c) => Math.abs(c.durationMs - med)));
+    if (mad <= 0) return [];
+
+    const findings = [];
+    for (const contact of contacts) {
+      const z = Math.abs(contact.durationMs - med) / mad;
+      if (z < madThreshold) continue;
+
+      findings.push({
+        signal: "irregular_rhythm",
+        startMs: contact.startMs,
+        endMs: contact.endMs,
+        score: Math.min(1, (z - madThreshold) / madThreshold),
+        quality: Screen._windowQuality(
+          left, right, Math.round(contact.startMs / dtMs), Math.round(contact.endMs / dtMs)
+        ),
+        headline: `${contact.foot} 腳觸地 ${contact.durationMs.toFixed(0)} ms，偏離節奏`,
+        detail:
+          `這一步的觸地時間與該選手中位數 ${med.toFixed(0)} ms 相差 ` +
+          `${Math.abs(contact.durationMs - med).toFixed(0)} ms（${z.toFixed(1)} 倍 MAD）。` +
+          `節奏斷裂本身不是犯規，但常伴隨犯規出現。`,
+        metrics: { contactMs: contact.durationMs, medianMs: med, z },
+      });
+    }
+    return findings;
+  },
+
+  coverage(left, right, fps) {
+    const masks = [...Events.contactMask(left, fps), ...Events.contactMask(right, fps)];
+    if (!masks.length) return 0;
+    return masks.filter((m) => m !== null).length / masks.length;
+  },
+
+  /** 跑完所有粗篩訊號，依 score × quality 排序。 */
+  run(left, right, fps, { contacts = null, joints = null,
+                          thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS,
+                          kneeThresholdDeg = DEFAULT_KNEE_THRESHOLD_DEG } = {}) {
+    const cap = Capability.assess(fps);
+    let findings = Screen.flights(left, right, fps, thresholdMs);
+
+    if (contacts && contacts.length) {
+      findings = findings.concat(Screen.rhythm(contacts, left, right, fps));
+      if (joints) {
+        findings = findings.concat(
+          Screen.knee(contacts, joints, fps, left, right, kneeThresholdDeg)
+        );
+      }
+    }
+
+    // 訊號再強，資料不可信就不該排前面
+    const priority = (f) => f.score * f.quality;
+    findings.sort((a, b) => priority(b) - priority(a));
+
+    const coverage = Screen.coverage(left, right, fps);
+    const notes = [];
+
+    if (coverage < LOW_COVERAGE_FRACTION) {
+      notes.push(
+        `只有 ${(coverage * 100).toFixed(0)}% 的影格可信，其餘多半是遮擋。` +
+        `粗篩只在可信的片段上進行，沒被標記不代表沒有問題——也可能只是那段看不到。`
+      );
+    }
+    if (!cap.flightTimeReliable) {
+      notes.push(
+        `${formatNum(fps)} fps 無法量出精確的騰空時間，騰空標記改用取樣界線：` +
+        `只在「無論取樣落在哪裡，騰空都超過 ${thresholdMs.toFixed(0)} ms」時才標記。` +
+        `靈敏度因此偏低——小幅度的騰空在這個幀率下無法分辨。`
+      );
+    }
+    if (!findings.length) {
+      notes.push("沒有片段達到標記門檻。這代表沒有明顯到能被證明的問題，不代表完全合規。");
+    }
+
+    return { fps, findings, coverage, notes };
   },
 };
 
