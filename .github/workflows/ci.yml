@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check racewalk tests
+
+      - name: Test
+        run: pytest -q
+
+      # 核心演算法只用標準函式庫，所以消融實驗可以直接在 CI 跑，
+      # 不需要模型權重或 GPU。數字若劣化會直接看得見。
+      - name: Frame-rate ablation
+        run: python -m racewalk.cli ablation
