@@ -243,6 +243,7 @@ const LM = {
 // 也方便想自己寫分析腳本的人在 console 直接呼叫。
 window.racewalk = {
   Signal, Capability, Events, Features, Synth, analyseTracks, render,
+  MIN_KEYPOINT_CONFIDENCE, MIN_CONFIDENT_FRACTION,
   DEFAULT_VISIBILITY_THRESHOLD_MS,
 };
 
@@ -542,8 +543,31 @@ function render(report, data, fps) {
       `這通常代表輸入的幀率高於影片的實際幀率，量出來的毫秒數會偏離真值——請重新確認幀率。`
     );
   }
+  // 被信心度守門擋掉的影格。集團畫面下這個數字往往才是關鍵——
+  // 使用者需要知道結果是建立在多少實際觀察上，而不是內插出來的。
+  const lowConf = ["left", "right"].map((side) => ({
+    side: side === "left" ? "左" : "右",
+    n: data[side].confidence.filter((c) => c < MIN_KEYPOINT_CONFIDENCE).length,
+    total: data[side].confidence.length,
+  }));
+
   if (data.missing > 0) {
-    notes.push(`有 ${data.missing} 格沒有偵測到人體，這些影格的關鍵點信心度已設為 0。`);
+    notes.push(`有 ${data.missing} 格完全沒有偵測到人體。`);
+  }
+  for (const { side, n, total } of lowConf) {
+    if (n === 0) continue;
+    const pct = ((n / total) * 100).toFixed(0);
+    notes.push(
+      `${side}腳有 ${n} / ${total} 格（${pct}%）的關鍵點信心度過低，多半是被其他選手遮擋。` +
+      `這些影格不參與地面高度的估計，落在其中的觸地／離地也不會被回報——` +
+      `寧可少報，也不要把遮擋期間內插出來的結果當成觀察到的事實。`
+    );
+  }
+  if (lowConf.some(({ n, total }) => n > total * (1 - MIN_CONFIDENT_FRACTION))) {
+    notes.push(
+      `可信影格不足一半，這段畫面無法支撐步態量測。集團行進、側後方機位、` +
+      `選手被擋住都會造成這個結果——這是畫面的限制，換演算法解決不了。`
+    );
   }
   $("notes").innerHTML = notes.map((n) => `<div class="note">${n}</div>`).join("");
 }

@@ -27,11 +27,23 @@ CASES = [
     {"fps": 120.0, "noise_px": 2.0},
     {"fps": 60.0, "noise_px": 1.0},
     {"fps": 30.0, "noise_px": 0.0},
+    # 遮擋案例：模擬姿態模型在集團畫面中鎖到旁邊選手的腳。
+    # 沒有這幾組，信心度守門的程式碼在移植驗證裡完全不會被執行到。
+    {"fps": 240.0, "noise_px": 1.0, "occlude": (700.0, 950.0, 500.0)},
+    {"fps": 240.0, "noise_px": 1.0, "occlude": (1100.0, 1250.0, 380.0)},
+    {"fps": 120.0, "noise_px": 1.0, "occlude": (900.0, 1400.0, 500.0)},
 ]
 
 
-def run_case(fps: float, noise_px: float) -> dict:
+def run_case(fps: float, noise_px: float, occlude: tuple | None = None) -> dict:
     left, right, truth = synth.synth_tracks(fps=fps, noise_px=noise_px)
+
+    if occlude is not None:
+        start_ms, end_ms, y_value = occlude
+        lo, hi = int(start_ms * fps / 1000), int(end_ms * fps / 1000)
+        for i in range(lo, min(hi, len(left.y))):
+            left.y[i] = y_value
+            left.confidence[i] = 0.0
 
     detected = events.detect_events(left, fps) + events.detect_events(right, fps)
     contacts = events.to_contacts(detected, Foot.LEFT) + events.to_contacts(detected, Foot.RIGHT)
@@ -43,8 +55,14 @@ def run_case(fps: float, noise_px: float) -> dict:
     return {
         "fps": fps,
         "noise_px": noise_px,
+        "occluded": occlude is not None,
         # 輸入：JS 端要拿這兩條軌跡跑自己的管線
-        "tracks": {"left": left.y, "right": right.y},
+        "tracks": {
+            "left": left.y,
+            "right": right.y,
+            "left_conf": left.confidence,
+            "right_conf": right.confidence,
+        },
         "truth": [
             {"foot": c.foot.value, "start_ms": c.start_ms, "end_ms": c.end_ms} for c in truth
         ],

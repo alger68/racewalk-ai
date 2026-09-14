@@ -183,3 +183,92 @@ def test_residual_noise_ignores_smooth_trend() -> None:
 
     ramp = [100.0 * math.sin(i / 200.0) for i in range(1000)]
     assert events.residual_noise_px(ramp) < 0.01
+
+
+# ---------------------------------------------------------------- 遮擋處理
+#
+# 比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，姿態模型這時常常
+# 鎖到旁邊選手的腳上，回傳一個位置任意但「看起來很合理」的錯誤姿態。
+# 以下兩個情境是實測過的真實失效模式。
+
+GROUND_Y = 500.0
+SWING_Y = 380.0
+
+
+def _occluded(y_value: float, start_ms: float, end_ms: float, gated: bool):
+    """把一段區間的足部 y 換成 y_value，模擬模型鎖錯目標。"""
+    fps = 240.0
+    left, _, truth = synth.synth_tracks(fps=fps, noise_px=1.0)
+    n = len(left.y)
+    lo, hi = int(start_ms * fps / 1000), int(end_ms * fps / 1000)
+
+    y = list(left.y)
+    for i in range(lo, hi):
+        y[i] = y_value
+    confidence = [0.0 if (gated and lo <= i < hi) else 1.0 for i in range(n)]
+
+    from racewalk.types import FootTrack
+
+    track = FootTrack(foot=Foot.LEFT, y=y, confidence=confidence)
+    contacts = events.to_contacts(events.detect_events(track, fps), Foot.LEFT)
+    expected = [c for c in truth if c.foot is Foot.LEFT]
+    return len(contacts), len(expected)
+
+
+def test_occlusion_during_swing_without_gating_loses_a_contact() -> None:
+    """模型在擺動期鎖到別人踩地的腳，會把兩次觸地黏成一次。"""
+    got, expected = _occluded(GROUND_Y, 700, 950, gated=False)
+    assert got < expected
+
+
+def test_occlusion_during_swing_is_survived_with_gating() -> None:
+    got, expected = _occluded(GROUND_Y, 700, 950, gated=True)
+    assert got == expected
+
+
+def test_occlusion_during_contact_without_gating_fabricates_a_contact() -> None:
+    """模型在觸地期鎖到別人擺動的腳，會把一次觸地切成兩次。
+
+    這是最危險的一種：切開的縫隙會被算成一段騰空，也就是憑空生出一次
+    可能被讀成犯規的證據。
+    """
+    got, expected = _occluded(SWING_Y, 1100, 1250, gated=False)
+    assert got > expected
+
+
+def test_occlusion_during_contact_is_survived_with_gating() -> None:
+    got, expected = _occluded(SWING_Y, 1100, 1250, gated=True)
+    assert got == expected
+
+
+def test_track_with_too_few_confident_frames_is_refused() -> None:
+    """可信影格太少時直接放棄，不要硬給一組看似精確的數字。"""
+    from racewalk.types import FootTrack
+
+    left, _, _ = synth.synth_tracks(fps=240.0)
+    n = len(left.y)
+    mostly_blind = [1.0 if i % 10 == 0 else 0.0 for i in range(n)]
+
+    track = FootTrack(foot=Foot.LEFT, y=left.y, confidence=mostly_blind)
+    assert events.detect_events(track, 240.0) == []
+
+
+def test_interpolation_does_not_fabricate_a_plateau() -> None:
+    """內插不可以造出水平平台——水平平台正是觸地的特徵。"""
+    from racewalk import signal as sg
+
+    y = [0.0, 10.0, 20.0, 99.0, 99.0, 99.0, 60.0, 70.0]
+    valid = [True, True, True, False, False, False, True, True]
+    filled = sg.interpolate_gaps(y, valid)
+
+    gap = filled[3:6]
+    assert gap == pytest.approx([30.0, 40.0, 50.0])
+    assert len(set(gap)) == 3  # 不是平台
+
+
+def test_interpolation_extends_edges() -> None:
+    from racewalk import signal as sg
+
+    y = [99.0, 99.0, 5.0, 7.0, 99.0]
+    valid = [False, False, True, True, False]
+    assert sg.interpolate_gaps(y, valid) == [5.0, 5.0, 5.0, 7.0, 7.0]

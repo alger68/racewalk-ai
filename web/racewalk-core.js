@@ -102,6 +102,44 @@ export const Signal = {
   },
 
   /**
+   * 把不可信的區段以線性內插填補。
+   *
+   * 為什麼不能直接沿用前一格的值：那會造出一段水平的平台，而水平平台正是
+   * 「腳踩在地上」的特徵。遮擋一發生就生出一次假觸地，這比沒有資料更糟。
+   *
+   * 內插不會讓遮擋期間的資料變成真的——事件仍須由信心度守門。這一步只是
+   * 避免把垃圾餵進濾波器汙染鄰近的影格。
+   */
+  interpolateGaps(x, valid) {
+    if (x.length !== valid.length) throw new RangeError("valid 遮罩與序列長度必須一致");
+    if (!valid.some(Boolean)) return [...x];
+
+    const out = [...x];
+    const n = x.length;
+    const first = valid.indexOf(true);
+    const last = valid.lastIndexOf(true);
+
+    // 頭尾的無效區段無法內插，只能延伸最近的有效值
+    for (let i = 0; i < first; i++) out[i] = x[first];
+    for (let i = last + 1; i < n; i++) out[i] = x[last];
+
+    let i = first;
+    while (i <= last) {
+      if (valid[i]) { i += 1; continue; }
+      const gapStart = i;
+      while (i <= last && !valid[i]) i += 1;
+      const gapEnd = i;
+      const y0 = x[gapStart - 1];
+      const y1 = x[gapEnd];
+      const span = gapEnd - (gapStart - 1);
+      for (let k = gapStart; k < gapEnd; k++) {
+        out[k] = y0 + ((y1 - y0) * (k - (gapStart - 1))) / span;
+      }
+    }
+    return out;
+  },
+
+  /**
    * 門檻交越位置，回傳次幀精度的浮點索引。
    *
    * 若只回整數索引，IC/TO 的誤差下限就是一個影格（240fps 下 4.2ms），
@@ -184,6 +222,18 @@ export const DEFAULT_CONTACT_BAND = 0.06;
 export const MIN_CONTACT_MS = 60;
 export const MIN_SWING_MS = 100;
 export const MIN_AMPLITUDE_PX = 1;
+
+// 關鍵點信心度的下限。低於此值的影格視為沒有觀察到，不參與地面高度與
+// 振幅的估計，落在其中的交越也不會成為事件。
+export const MIN_KEYPOINT_CONFIDENCE = 0.5;
+
+// 整段軌跡至少要有這個比例的可信影格，否則直接放棄。
+// 比賽的集團畫面常常連這條都過不了——那是畫面的限制，不是演算法的問題，
+// 此時回報「量不了」遠比給出一組看似精確的數字誠實。
+export const MIN_CONFIDENT_FRACTION = 0.5;
+
+// 判定交越是否落在可信區間時，往前後各檢查幾格。
+export const CONFIDENCE_MARGIN_FRAMES = 2;
 export const NOISE_MARGIN = 6;
 
 export const Events = {
@@ -228,14 +278,28 @@ export const Events = {
       minContactMs = MIN_CONTACT_MS,
     } = opts;
 
-    if (track.y.length < 8) return [];
+    const n = track.y.length;
+    if (n < 8) return [];
 
     const dtMs = 1000 / fps;
-    const y = Signal.filtfilt(track.y, Math.min(cutoffHz, fps * MAX_CUTOFF_RATIO), fps);
 
-    // 影像座標 y 向下為正 → 腳踩在地上時 y 最大
-    const ground = Signal.percentile(y, 95);
-    const amplitude = ground - Signal.percentile(y, 5);
+    // 信心度守門。比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，
+    // 那些影格的關鍵點座標是垃圾。若讓它們參與地面高度與振幅的估計，
+    // 整條軌跡的門檻都會跟著跑掉。
+    const confs = track.confidence ?? new Array(n).fill(1);
+    const valid = confs.map((c) => c >= MIN_KEYPOINT_CONFIDENCE);
+    if (valid.filter(Boolean).length < n * MIN_CONFIDENT_FRACTION) return [];
+
+    const y = Signal.filtfilt(
+      Signal.interpolateGaps(track.y, valid),
+      Math.min(cutoffHz, fps * MAX_CUTOFF_RATIO),
+      fps
+    );
+
+    // 影像座標 y 向下為正 → 腳踩在地上時 y 最大。只取可信的影格來估地面與振幅。
+    const confidentY = y.filter((_, i) => valid[i]);
+    const ground = Signal.percentile(confidentY, 95);
+    const amplitude = ground - Signal.percentile(confidentY, 5);
     if (amplitude < MIN_AMPLITUDE_PX) return [];
 
     const band = Events.adaptiveBand(y, amplitude, contactBand);
@@ -245,23 +309,34 @@ export const Events = {
     const conf = (idx) => Events._confidence(track, velocity, idx);
 
     let events = [
-      ...Signal.crossings(y, threshold, true).map((idx) => ({
+      ...Signal.crossings(y, threshold, true).map((idx) => ({ idx, kind: "IC" })),
+      ...Signal.crossings(y, threshold, false).map((idx) => ({ idx, kind: "TO" })),
+    ]
+      // 落在遮擋區間裡的交越是內插的產物，不是觀察到的事件
+      .filter(({ idx }) => Events._inConfidentRegion(valid, idx))
+      .map(({ idx, kind }) => ({
         foot: track.foot,
-        kind: "IC",
+        kind,
         tMs: idx * dtMs,
         confidence: conf(idx),
-      })),
-      ...Signal.crossings(y, threshold, false).map((idx) => ({
-        foot: track.foot,
-        kind: "TO",
-        tMs: idx * dtMs,
-        confidence: conf(idx),
-      })),
-    ];
+      }));
 
     events.sort((a, b) => a.tMs - b.tMs);
     events = Events._mergeShortGaps(events, MIN_SWING_MS);
     return Events._dropShortContacts(events, minContactMs);
+  },
+
+  /**
+   * 交越點前後 margin 格是否都可信。
+   *
+   * 只檢查交越點那一格是不夠的：遮擋的邊緣正是關鍵點開始飄移的地方，
+   * 而飄移本身就會製造交越。
+   */
+  _inConfidentRegion(valid, idx, margin = CONFIDENCE_MARGIN_FRAMES) {
+    const lo = Math.max(0, Math.trunc(idx) - margin);
+    const hi = Math.min(valid.length, Math.trunc(idx) + margin + 2);
+    for (let i = lo; i < hi; i++) if (!valid[i]) return false;
+    return true;
   },
 
   _confidence(track, velocity, idx) {

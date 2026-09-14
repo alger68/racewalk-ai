@@ -59,6 +59,19 @@ MIN_SWING_MS = 100.0
 # 通常是追蹤失敗或關鍵點卡住，此時不該硬生出事件。
 MIN_AMPLITUDE_PX = 1.0
 
+# 關鍵點信心度的下限。低於此值的影格視為沒有觀察到，不參與地面高度與
+# 振幅的估計，落在其中的交越也不會成為事件。
+MIN_KEYPOINT_CONFIDENCE = 0.5
+
+# 整段軌跡至少要有這個比例的可信影格，否則直接放棄。
+# 比賽的集團畫面常常連這條都過不了——那是畫面的限制，不是演算法的問題，
+# 此時回報「量不了」遠比給出一組看似精確的數字誠實。
+MIN_CONFIDENT_FRACTION = 0.5
+
+# 判定交越是否落在可信區間時，往前後各檢查幾格。
+# 只看交越點那一格不夠：遮擋的邊緣往往就是關鍵點開始飄的地方。
+CONFIDENCE_MARGIN_FRAMES = 2
+
 
 def detect_events(
     track: FootTrack,
@@ -73,11 +86,25 @@ def detect_events(
         return []
 
     dt_ms = 1000.0 / fps
-    y = signal.filtfilt(track.y, min(cutoff_hz, fps * MAX_CUTOFF_RATIO), fps)
+
+    # 信心度守門。比賽的集團畫面裡，被追蹤選手的腳會週期性被別人擋住，
+    # 那些影格的關鍵點座標是垃圾。若讓它們參與地面高度與振幅的估計，
+    # 整條軌跡的門檻都會跟著跑掉。
+    valid = [c >= MIN_KEYPOINT_CONFIDENCE for c in track.confidence]
+    if sum(valid) < n * MIN_CONFIDENT_FRACTION:
+        return []  # 可信的影格太少，這段沒有東西可以量
+
+    y = signal.filtfilt(
+        signal.interpolate_gaps(track.y, valid),
+        min(cutoff_hz, fps * MAX_CUTOFF_RATIO),
+        fps,
+    )
 
     # 影像座標 y 向下為正 → 腳踩在地上時 y 最大。
-    ground = signal.percentile(y, 95.0)
-    swing_top = signal.percentile(y, 5.0)
+    # 只取可信的影格來估地面與振幅。
+    confident_y = [v for v, ok in zip(y, valid, strict=True) if ok]
+    ground = signal.percentile(confident_y, 95.0)
+    swing_top = signal.percentile(confident_y, 5.0)
     amplitude = ground - swing_top
 
     if amplitude < MIN_AMPLITUDE_PX:
@@ -92,21 +119,16 @@ def detect_events(
     velocity = signal.derivative(y, dt_ms / 1000.0)
     events: list[GaitEvent] = []
 
-    for idx in ic_idx:
+    for idx, kind in [(i, EventKind.INITIAL_CONTACT) for i in ic_idx] + [
+        (i, EventKind.TOE_OFF) for i in to_idx
+    ]:
+        # 落在遮擋區間裡的交越是內插的產物，不是觀察到的事件
+        if not _in_confident_region(valid, idx):
+            continue
         events.append(
             GaitEvent(
                 foot=track.foot,
-                kind=EventKind.INITIAL_CONTACT,
-                t_ms=idx * dt_ms,
-                confidence=_confidence(track, velocity, idx),
-                method="narrow-threshold",
-            )
-        )
-    for idx in to_idx:
-        events.append(
-            GaitEvent(
-                foot=track.foot,
-                kind=EventKind.TOE_OFF,
+                kind=kind,
                 t_ms=idx * dt_ms,
                 confidence=_confidence(track, velocity, idx),
                 method="narrow-threshold",
@@ -159,6 +181,19 @@ def _adaptive_band(filtered: list[float], amplitude: float, floor: float) -> flo
         return floor
 
     return max(floor, NOISE_MARGIN * residual_noise_px(filtered) / amplitude)
+
+
+def _in_confident_region(
+    valid: list[bool], idx: float, margin: int = CONFIDENCE_MARGIN_FRAMES
+) -> bool:
+    """交越點前後 margin 格是否都可信。
+
+    只檢查交越點那一格是不夠的：遮擋的邊緣正是關鍵點開始飄移的地方，
+    而飄移本身就會製造交越。
+    """
+    lo = max(0, int(idx) - margin)
+    hi = min(len(valid), int(idx) + margin + 2)
+    return all(valid[lo:hi])
 
 
 def _confidence(track: FootTrack, velocity: list[float], idx: float) -> float:

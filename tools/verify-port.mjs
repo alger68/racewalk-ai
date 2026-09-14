@@ -26,8 +26,8 @@ const TOL_MS = 1e-6;
 
 function analyse(caseData) {
   const { fps, tracks } = caseData;
-  const left = { foot: "L", y: tracks.left, confidence: tracks.left.map(() => 1) };
-  const right = { foot: "R", y: tracks.right, confidence: tracks.right.map(() => 1) };
+  const left = { foot: "L", y: tracks.left, confidence: tracks.left_conf };
+  const right = { foot: "R", y: tracks.right, confidence: tracks.right_conf };
 
   const detected = [...Events.detect(left, fps), ...Events.detect(right, fps)];
   const contacts = [
@@ -48,7 +48,8 @@ const fail = (label, msg) => {
 const { cases } = JSON.parse(readFileSync(join(here, "port-fixtures.json"), "utf-8"));
 
 for (const caseData of cases) {
-  const label = `fps=${caseData.fps} noise=${caseData.noise_px}px`;
+  const label =
+    `fps=${caseData.fps} noise=${caseData.noise_px}px` + (caseData.occluded ? " +遮擋" : "");
   const { cap, report } = analyse(caseData);
   const want = caseData.expected;
 

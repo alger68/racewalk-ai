@@ -101,6 +101,50 @@ def percentile(x: Series, q: float) -> float:
     return s[lo] * (1.0 - frac) + s[hi] * frac
 
 
+def interpolate_gaps(x: Series, valid: list[bool]) -> Series:
+    """把不可信的區段以線性內插填補。
+
+    為什麼不能直接沿用前一格的值：那會造出一段水平的平台，而水平平台正是
+    「腳踩在地上」的特徵。遮擋一發生就生出一次假觸地，這比沒有資料更糟。
+    線性內插至少會延續遮擋前後的趨勢，不會憑空造出觸地的形狀。
+
+    內插不會讓遮擋期間的資料變成真的——事件仍須由信心度守門（見
+    gait/events.py）。這一步只是避免把垃圾餵進濾波器汙染鄰近的影格。
+    """
+    if len(x) != len(valid):
+        raise ValueError("valid 遮罩與序列長度必須一致")
+    if not any(valid):
+        return list(x)
+
+    out = list(x)
+    n = len(x)
+
+    first = valid.index(True)
+    last = n - 1 - valid[::-1].index(True)
+
+    # 頭尾的無效區段無法內插，只能延伸最近的有效值
+    for i in range(first):
+        out[i] = x[first]
+    for i in range(last + 1, n):
+        out[i] = x[last]
+
+    i = first
+    while i <= last:
+        if valid[i]:
+            i += 1
+            continue
+        gap_start = i
+        while i <= last and not valid[i]:
+            i += 1
+        gap_end = i  # 第一個重新有效的位置
+        y0, y1 = x[gap_start - 1], x[gap_end]
+        span = gap_end - (gap_start - 1)
+        for k in range(gap_start, gap_end):
+            out[k] = y0 + (y1 - y0) * (k - (gap_start - 1)) / span
+
+    return out
+
+
 def crossings(x: Series, threshold: float, rising: bool) -> list[float]:
     """找出序列穿越門檻的位置，回傳「次幀精度」的索引（浮點數）。
 
