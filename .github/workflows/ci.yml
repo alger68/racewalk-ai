@@ -13,6 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Install
         run: pip install -e ".[dev]"
@@ -27,3 +30,14 @@ jobs:
       # 不需要模型權重或 GPU。數字若劣化會直接看得見。
       - name: Frame-rate ablation
         run: python -m racewalk.cli ablation
+
+      # 網頁版有一份獨立的 JS 實作。兩份若各自演化，同一段影片在 CLI 與
+      # 瀏覽器會給出不同的騰空毫秒數，而使用者無從得知該相信哪一個。
+      - name: Verify JS port matches Python
+        run: |
+          python tools/dump-fixtures.py
+          node tools/verify-port.mjs
+
+      # analyzer.html 由 racewalk-core.js 內嵌產生，確保提交的版本沒有脫節。
+      - name: Verify analyzer.html is up to date
+        run: python tools/build-web.py --check

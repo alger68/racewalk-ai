@@ -15,3 +15,6 @@ data/
 *.avi
 *.parquet
 outputs/
+
+# 由 tools/dump-fixtures.py 產生，CI 會重新生成
+tools/port-fixtures.json

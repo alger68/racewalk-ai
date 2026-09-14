@@ -20,7 +20,51 @@ World Athletics 規則 TR54 對競走只有兩條技術要求：不得有**肉�
 輸出是**騰空時間（毫秒）加上量測不確定度**，再與一個可調的可見性門檻比較。
 若只回答「有沒有騰空」，會把所有合格選手都標成犯規，工具當場失去意義。
 
-## 快速開始
+## 網頁版：不用裝任何東西
+
+`web/analyzer.html` 是一個可以直接用瀏覽器開啟的獨立分析工具：選影片 →
+自動抓骨架 → 算出觸地、騰空時間與膝角。不需要 Python、不需要命令列。
+
+**影片完全在瀏覽器內處理，不會上傳到任何伺服器。** 這對選手肖像權來說很重要。
+
+```bash
+# 下載 repo 後直接用瀏覽器開啟這個檔案即可
+open web/analyzer.html          # macOS
+start web\analyzer.html         # Windows
+```
+
+首次使用需要連網，瀏覽器會從 CDN 取得 MediaPipe 的姿態估計模型（之後會快取）。
+
+### 兩份實作，一組數字
+
+核心演算法有 Python 與 JavaScript 兩份實作——CLI 用前者，網頁版用後者。
+兩份若各自演化，同一段影片在兩邊會給出不同的騰空毫秒數，而使用者沒有辦法
+知道該相信哪一個。所以 CI 會用同一組軌跡跑兩邊並逐數值比對：
+
+```bash
+python3 tools/dump-fixtures.py && node tools/verify-port.mjs
+```
+
+實測差異在 1e-13 毫秒的量級，也就是純粹的浮點捨入。
+
+`web/racewalk-core.js` 是唯一來源，`analyzer.html` 由它內嵌產生
+（瀏覽器從 `file://` 載入 ES module 會被 CORS 擋，所以必須內嵌）：
+
+```bash
+python3 tools/build-web.py           # 重新產生 analyzer.html
+python3 tools/build-web.py --check   # 檢查是否同步（CI 用）
+```
+
+### 網頁版的限制
+
+- **幀率要自己確認。** 瀏覽器沒有可靠的方式讀出影片幀率。頁面會用極慢速播放
+  搭配 `requestVideoFrameCallback` 推算，但這只是參考值——**請以你拍攝時的
+  設定為準**。這個值錯了，所有毫秒數都會跟著錯。
+- **姿態估計用 MediaPipe**，精度低於 RTMPose。在遮擋、逆光、多人同框的情況下
+  會失敗，頁面會把那些影格的信心度標為 0 並提示。
+- **逐格 seek 很慢**，2–3 秒的片段大約要等數十秒。
+
+## 快速開始（命令列版）
 
 不需要任何模型權重或 GPU，核心演算法只用 Python 標準函式庫：
 
@@ -67,6 +111,8 @@ racewalk check my_video.mp4
 | N8 規則引擎 | `racewalk/rules/` | 未開始（M5） |
 | N9 證據與報表 | `racewalk/report/` | CLI 文字輸出 |
 | N10 人工複核 | `web/` | 未開始（M5） |
+
+網頁版分析工具見 `web/analyzer.html`（上方「網頁版」一節）。
 
 姿態估計尚未接上，目前以 `racewalk/synth.py` 的合成軌跡驅動與驗證整條管線。
 

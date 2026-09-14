@@ -1,0 +1,1236 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>競走步態分析</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#E8EAE9; --surface:#F6F7F6; --surface-2:#DEE2E1;
+  --ink:#14181A; --ink-2:#4C5558; --ink-3:#6E7779;
+  --rule:#C7CDCC; --rule-soft:#D8DDDC;
+  --accent:#A4620B; --accent-wash:#EFE0C6;
+  --danger:#A02A1D; --danger-wash:#EFD8D4;
+  --ok:#2A6349; --ok-wash:#D5E5DD;
+  --left:#8A5A00; --right:#2A5B6B;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#131719; --surface:#1B2023; --surface-2:#242A2E;
+    --ink:#E7EBEA; --ink-2:#9BA5A8; --ink-3:#7D8789;
+    --rule:#2F3639; --rule-soft:#262C2F;
+    --accent:#E2A244; --accent-wash:#3A2E1B;
+    --danger:#E3887A; --danger-wash:#3A2321;
+    --ok:#68BC93; --ok-wash:#1E3329;
+    --left:#E2A244; --right:#6FB3C9;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131719; --surface:#1B2023; --surface-2:#242A2E;
+  --ink:#E7EBEA; --ink-2:#9BA5A8; --ink-3:#7D8789;
+  --rule:#2F3639; --rule-soft:#262C2F;
+  --accent:#E2A244; --accent-wash:#3A2E1B;
+  --danger:#E3887A; --danger-wash:#3A2321;
+  --ok:#68BC93; --ok-wash:#1E3329;
+  --left:#E2A244; --right:#6FB3C9;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  font-size:15px; line-height:1.8; -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:980px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+
+header{border-bottom:1px solid var(--rule);padding-block:40px 24px;display:flex;flex-direction:column;gap:14px}
+h1{font-family:"Noto Serif TC",Georgia,serif;font-size:clamp(26px,4.5vw,38px);margin:0;line-height:1.25;text-wrap:balance}
+.disclaim{
+  background:var(--accent-wash);border-left:3px solid var(--accent);
+  padding:12px 16px;font-size:13.5px;line-height:1.7;color:var(--ink);
+}
+.disclaim b{font-weight:700}
+
+.step{border-bottom:1px solid var(--rule-soft);padding-block:24px;display:flex;flex-direction:column;gap:14px}
+.step h2{
+  font-size:15px;margin:0;display:flex;align-items:baseline;gap:11px;font-weight:700;
+}
+.step h2 .n{
+  font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--accent);
+  border:1px solid var(--accent);border-radius:2px;padding:0 6px;flex:none;
+}
+.hint{font-size:13px;color:var(--ink-2);line-height:1.75;max-width:70ch;margin:0}
+
+input[type=file]{font:inherit;font-size:13.5px}
+.row{display:flex;flex-wrap:wrap;gap:14px 22px;align-items:flex-end}
+label.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-3)}
+label.field input{
+  font-family:"IBM Plex Mono",monospace;font-size:15px;
+  background:var(--surface);color:var(--ink);
+  border:1px solid var(--rule);border-radius:3px;padding:7px 10px;width:130px;
+}
+button{
+  font:inherit;font-weight:700;font-size:14.5px;cursor:pointer;
+  background:var(--accent);color:var(--bg);
+  border:none;border-radius:3px;padding:10px 22px;
+}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.ghost{background:none;color:var(--accent);border:1px solid var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+video{width:100%;max-width:520px;background:#000;border:1px solid var(--rule);display:block}
+
+.tierbox{padding:12px 16px;font-size:13.5px;line-height:1.7;border-left:3px solid var(--rule);background:var(--surface)}
+.tierbox.full{border-left-color:var(--ok);background:var(--ok-wash)}
+.tierbox.reduced{border-left-color:var(--accent);background:var(--accent-wash)}
+.tierbox.gait_only{border-left-color:var(--danger);background:var(--danger-wash)}
+
+progress{width:100%;max-width:520px;height:6px}
+.status{font-size:13px;color:var(--ink-2);font-family:"IBM Plex Mono",monospace}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.tile{background:var(--surface);padding:14px 16px;display:flex;flex-direction:column;gap:2px}
+.tile dt{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);font-family:"IBM Plex Mono",monospace}
+.tile dd{margin:0;font-family:"IBM Plex Mono",monospace;font-size:21px;font-weight:600}
+.tile dd small{font-size:12px;font-weight:400;color:var(--ink-3)}
+
+.scroller{overflow-x:auto;border:1px solid var(--rule);background:var(--surface)}
+.scroller svg{display:block;min-width:640px;width:100%;height:auto}
+
+table{border-collapse:collapse;width:100%;min-width:520px;font-size:13.5px}
+th,td{text-align:left;padding:9px 13px;border-bottom:1px solid var(--rule-soft);line-height:1.6}
+thead th{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);font-weight:500;background:var(--surface-2);
+}
+tbody tr:last-child td{border-bottom:none}
+td.num{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.verdict{
+  display:inline-block;font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:2px;
+  font-family:"IBM Plex Mono",monospace;
+}
+.verdict.suspected{background:var(--danger-wash);color:var(--danger)}
+.verdict.within_tolerance{background:var(--ok-wash);color:var(--ok)}
+.verdict.inconclusive{background:var(--accent-wash);color:var(--accent)}
+.verdict.unreliable{background:var(--surface-2);color:var(--ink-3)}
+
+.note{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding-block:13px;font-size:13.5px;color:var(--ink-2);line-height:1.75}
+.err{background:var(--danger-wash);border-left:3px solid var(--danger);padding:12px 16px;font-size:13.5px;line-height:1.7}
+h3{font-size:14px;margin:0;font-weight:700}
+footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-3);line-height:1.8}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>競走步態分析</h1>
+  <div class="disclaim">
+    <b>這是輔助分析工具，不是判罰工具。</b>
+    競走犯規的判定權屬於人類裁判。本頁的所有標記都是「疑似，待人工複核」，
+    不構成任何正式判定。影片完全在你的瀏覽器內處理，不會上傳到任何伺服器。
+  </div>
+</header>
+
+<section class="step">
+  <h2><span class="n">1</span>選擇影片</h2>
+  <p class="hint">
+    側向拍攝、選手雙腳完整入鏡的片段效果最好。影片不會離開這台電腦。
+  </p>
+  <input type="file" id="file" accept="video/*">
+  <video id="video" playsinline muted hidden></video>
+  <div id="fileInfo" class="status" hidden></div>
+</section>
+
+<section class="step" id="stepFps" hidden>
+  <h2><span class="n">2</span>確認幀率</h2>
+  <p class="hint">
+    幀率決定這段影片能不能用來量騰空時間，<strong>而且瀏覽器讀到的值未必正確</strong>——
+    手機切到慢動作模式時常會改變實際幀率。自動判讀僅供參考，請以你拍攝時的設定為準。
+  </p>
+  <div class="row">
+    <label class="field">幀率 (fps)
+      <input type="number" id="fps" min="1" max="1000" step="0.001">
+    </label>
+    <button class="ghost" id="measure" type="button">重新自動判讀</button>
+  </div>
+  <div id="fpsStatus" class="status"></div>
+  <div id="tier" class="tierbox"></div>
+</section>
+
+<section class="step" id="stepRange" hidden>
+  <h2><span class="n">3</span>選擇分析區間</h2>
+  <p class="hint">
+    每一格影格都要跑一次姿態估計，所以區間越長等越久。先用 2–3 秒
+    （約 4–6 個步態週期）就足夠看出結果。
+  </p>
+  <div class="row">
+    <label class="field">起點 (秒)
+      <input type="number" id="start" min="0" step="0.1" value="0">
+    </label>
+    <label class="field">長度 (秒)
+      <input type="number" id="dur" min="0.5" max="10" step="0.5" value="2.5">
+    </label>
+    <button id="run" type="button">開始分析</button>
+  </div>
+  <div id="frameEstimate" class="status"></div>
+</section>
+
+<section class="step" id="stepProgress" hidden>
+  <h2>處理中</h2>
+  <progress id="bar" value="0" max="100"></progress>
+  <div id="progressText" class="status"></div>
+</section>
+
+<div id="error" class="err" hidden></div>
+
+<section class="step" id="results" hidden>
+  <h2><span class="n">4</span>結果</h2>
+  <div id="resultTier" class="tierbox"></div>
+
+  <dl class="tiles" id="tiles"></dl>
+
+  <h3>時間軸</h3>
+  <div class="scroller"><svg id="timeline" viewBox="0 0 900 190" role="img"
+    aria-label="左右腳觸地時間軸與騰空區間"></svg></div>
+
+  <h3>騰空區間</h3>
+  <div class="scroller"><table id="flightTable"></table></div>
+
+  <h3>逐次觸地</h3>
+  <div class="scroller"><table id="contactTable"></table></div>
+
+  <div id="notes"></div>
+</section>
+
+<footer>
+  競走步態分析 · racewalk-ai · 規則依據 World Athletics TR54<br>
+  姿態估計使用 MediaPipe Pose。本頁為工程分析工具，非官方裁判設備。
+</footer>
+
+</div>
+
+<script type="module">
+// MediaPipe 刻意用動態 import：若寫成頂層 import，CDN 連不上時整個模組會載入
+// 失敗，使用者看到的是一片空白的頁面而不是錯誤訊息。延遲到真正要跑姿態估計
+// 時才載入，頁面本身即使離線也開得起來，錯誤也能指出真正的原因。
+const MEDIAPIPE_URL =
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+  // ===================================================================
+  // 以下由 tools/build-web.py 從 web/racewalk-core.js 自動內嵌。
+  // 不要直接改這一段——改 racewalk-core.js，然後重跑：
+  //     python3 tools/build-web.py
+  // ===================================================================
+/**
+ * 競走步態分析核心演算法 — JavaScript 版。
+ *
+ * 這是 racewalk/ 下 Python 實作的移植，行為必須逐數值一致。
+ * tools/verify-port.mjs 會用同一組合成軌跡比對兩邊的輸出，
+ * 任何一邊改動而另一邊沒跟上，驗證就會失敗。
+ *
+ * 對應關係：
+ *   signal.py      → Signal
+ *   capability.py  → Capability
+ *   gait/events.py → Events
+ *   gait/features.py → Features
+ *   synth.py       → Synth（僅供驗證與示範用）
+ *
+ * 不依賴 DOM，可以在瀏覽器與 Node 兩邊跑。
+ */
+
+// ---------------------------------------------------------------- Signal
+
+const Signal = {
+  /** 二階 Butterworth 低通的 biquad 係數（雙線性轉換）。 */
+  butter2Lowpass(cutoffHz, fs) {
+    if (!(cutoffHz > 0 && cutoffHz < fs / 2)) {
+      throw new RangeError(`截止頻率 ${cutoffHz} Hz 必須介於 0 與 Nyquist (${fs / 2}) 之間`);
+    }
+    const wc = Math.tan((Math.PI * cutoffHz) / fs);
+    const k1 = Math.SQRT2 * wc;
+    const k2 = wc * wc;
+    const a0 = 1 + k1 + k2;
+    return {
+      b: [k2 / a0, (2 * k2) / a0, k2 / a0],
+      a: [1, (2 * (k2 - 1)) / a0, (1 - k1 + k2) / a0],
+    };
+  },
+
+  /**
+   * Direct form I，單向。
+   *
+   * 狀態以 x[0] 為基準而非零。足部座標的 DC 偏移動輒數百像素，
+   * 若讓狀態從零開始，輸出會在開頭衝出一段幅度數百像素的假訊號。
+   */
+  lfilter(b, a, x) {
+    const offset = x.length ? x[0] : 0;
+    const xs = x.map((v) => v - offset);
+    const y = new Array(xs.length).fill(0);
+
+    for (let n = 0; n < xs.length; n++) {
+      let acc = b[0] * xs[n];
+      if (n >= 1) acc += b[1] * xs[n - 1] - a[1] * y[n - 1];
+      if (n >= 2) acc += b[2] * xs[n - 2] - a[2] * y[n - 2];
+      y[n] = acc;
+    }
+    return y.map((v) => v + offset);
+  },
+
+  /**
+   * 零相位低通：前向 + 後向各濾一次。
+   *
+   * 邊界用鏡像填補。奇對稱反射會把雜訊汙染的端點放大兩倍灌進濾波器，
+   * 實測尾端殘差 0.35 vs 鏡像的 0.09。
+   */
+  filtfilt(x, cutoffHz, fs, pad = 12) {
+    if (x.length < 4) return [...x];
+    const { b, a } = Signal.butter2Lowpass(cutoffHz, fs);
+
+    const p = Math.min(pad, x.length - 1);
+    const head = [];
+    for (let i = p; i >= 1; i--) head.push(x[i]);
+    // 取 p 個元素：索引 len-2 往下數到 len-1-p（含）。
+    // 邊界差一個元素就會讓後向濾波的暫態不同，低幀率下造成約 1e-4 ms 的偏差。
+    const tail = [];
+    for (let i = x.length - 2; i >= x.length - 1 - p && i >= 0; i--) tail.push(x[i]);
+
+    const padded = [...head, ...x, ...tail];
+    const forward = Signal.lfilter(b, a, padded);
+    const backward = Signal.lfilter(b, a, [...forward].reverse()).reverse();
+
+    return backward.slice(p, p + x.length);
+  },
+
+  /** 中央差分；兩端退回單邊差分。 */
+  derivative(x, dt) {
+    const n = x.length;
+    if (n < 2) return new Array(n).fill(0);
+    const out = new Array(n).fill(0);
+    out[0] = (x[1] - x[0]) / dt;
+    out[n - 1] = (x[n - 1] - x[n - 2]) / dt;
+    for (let i = 1; i < n - 1; i++) out[i] = (x[i + 1] - x[i - 1]) / (2 * dt);
+    return out;
+  },
+
+  /** 線性內插的百分位數（q 為 0–100）。 */
+  percentile(x, q) {
+    if (!x.length) throw new RangeError("空序列沒有百分位數");
+    const s = [...x].sort((m, n) => m - n);
+    if (s.length === 1) return s[0];
+    const pos = (q / 100) * (s.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.min(lo + 1, s.length - 1);
+    const frac = pos - lo;
+    return s[lo] * (1 - frac) + s[hi] * frac;
+  },
+
+  /**
+   * 門檻交越位置，回傳次幀精度的浮點索引。
+   *
+   * 若只回整數索引，IC/TO 的誤差下限就是一個影格（240fps 下 4.2ms），
+   * 對 40ms 的判定來說太粗。
+   */
+  crossings(x, threshold, rising) {
+    const out = [];
+    for (let i = 0; i < x.length - 1; i++) {
+      const a = x[i];
+      const b = x[i + 1];
+      const hit = rising ? a < threshold && threshold <= b : a >= threshold && threshold > b;
+      if (!hit) continue;
+      out.push(b === a ? i : i + (threshold - a) / (b - a));
+    }
+    return out;
+  },
+};
+
+// ------------------------------------------------------------ Capability
+
+/**
+ * 人眼可見性門檻的預設值（毫秒）。
+ *
+ * 這是可調參數，不是物理常數——規則寫的是「肉眼可見的騰空」，
+ * 而「可見」沒有官方數值定義。40ms 是起始假設，須以裁判對照校準。
+ */
+const DEFAULT_VISIBILITY_THRESHOLD_MS = 40;
+const MIN_FPS_FOR_FLIGHT = 120;
+const FPS_FOR_FULL_CONFIDENCE = 240;
+
+const Capability = {
+  assess(fps) {
+    if (!(fps > 0)) throw new RangeError(`幀率必須為正數，收到 ${fps}`);
+
+    const frameIntervalMs = 1000 / fps;
+    let tier;
+    if (fps >= FPS_FOR_FULL_CONFIDENCE) tier = "full";
+    else if (fps >= MIN_FPS_FOR_FLIGHT) tier = "reduced";
+    else tier = "gait_only";
+
+    return {
+      fps,
+      tier,
+      frameIntervalMs,
+      flightUncertaintyMs: frameIntervalMs * 0.5,
+      flightTimeReliable: tier !== "gait_only",
+    };
+  },
+
+  describe(cap) {
+    const head = `${formatNum(cap.fps)} fps（每幀 ${cap.frameIntervalMs.toFixed(1)} ms）`;
+    if (cap.tier === "full") return `${head} — 騰空量測可靠`;
+    if (cap.tier === "reduced") {
+      return `${head} — 騰空量測可用，但不確定度達 ±${cap.flightUncertaintyMs.toFixed(
+        1
+      )} ms，判讀時務必連同誤差一起看`;
+    }
+    return `${head} — 幀率不足，不輸出騰空時間；僅提供膝角、步頻、步長`;
+  },
+
+  /**
+   * 把騰空時間對應到結論。
+   *
+   * 回傳值永遠是「疑似」而非「犯規」。系統不做判罰，判定權屬於裁判。
+   */
+  flightVerdict(flightMs, cap, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+    if (!cap.flightTimeReliable) return "unreliable";
+    const u = cap.flightUncertaintyMs;
+    if (flightMs - u > thresholdMs) return "suspected";
+    if (flightMs + u < thresholdMs) return "within_tolerance";
+    return "inconclusive";
+  },
+};
+
+// ---------------------------------------------------------------- Events
+
+const DEFAULT_CUTOFF_HZ = 50;
+const MAX_CUTOFF_RATIO = 0.4;
+const DEFAULT_CONTACT_BAND = 0.06;
+const MIN_CONTACT_MS = 60;
+const MIN_SWING_MS = 100;
+const MIN_AMPLITUDE_PX = 1;
+const NOISE_MARGIN = 6;
+
+const Events = {
+  /**
+   * 估計序列中殘留的高頻雜訊（像素標準差）。
+   *
+   * 量的是「濾波後還剩多少」而非「濾掉了多少」：低幀率影片的截止頻率
+   * 會被 Nyquist 夾得很高，濾波器其實沒濾掉多少東西。
+   */
+  residualNoisePx(y) {
+    if (y.length < 3) return 0;
+    const rough = [];
+    for (let i = 1; i < y.length - 1; i++) rough.push(y[i] - (y[i - 1] + y[i + 1]) / 2);
+    const n = rough.length;
+    const mean = rough.reduce((s, v) => s + v, 0) / n;
+    const variance = rough.reduce((s, v) => s + (v - mean) ** 2, 0) / Math.max(1, n - 1);
+    return Math.sqrt(variance) / 1.2247;
+  },
+
+  /**
+   * 依實測雜訊放寬觸地門檻。
+   *
+   * 門檻一旦落進雜訊振幅範圍，雜訊自己就會製造假交越，結果從「稍微不準」
+   * 直接崩壞成「完全錯誤」。雜訊小時維持高精度，雜訊大時寧可犧牲精度。
+   */
+  adaptiveBand(filtered, amplitude, floor) {
+    if (amplitude <= 0) return floor;
+    return Math.max(floor, (NOISE_MARGIN * Events.residualNoisePx(filtered)) / amplitude);
+  },
+
+  /**
+   * 偵測單腳的觸地 (IC) / 離地 (TO) 事件。
+   *
+   * 門檻寬度是最關鍵的參數：門檻必然設在地面之上，使 TO 偏晚、IC 偏早，
+   * 而騰空時間夾在兩者之間，會被系統性低估兩倍偏差。實測門檻 0.25 造成
+   * ±11ms 偏差，0.06 則小於 1ms。
+   */
+  detect(track, fps, opts = {}) {
+    const {
+      cutoffHz = DEFAULT_CUTOFF_HZ,
+      contactBand = DEFAULT_CONTACT_BAND,
+      minContactMs = MIN_CONTACT_MS,
+    } = opts;
+
+    if (track.y.length < 8) return [];
+
+    const dtMs = 1000 / fps;
+    const y = Signal.filtfilt(track.y, Math.min(cutoffHz, fps * MAX_CUTOFF_RATIO), fps);
+
+    // 影像座標 y 向下為正 → 腳踩在地上時 y 最大
+    const ground = Signal.percentile(y, 95);
+    const amplitude = ground - Signal.percentile(y, 5);
+    if (amplitude < MIN_AMPLITUDE_PX) return [];
+
+    const band = Events.adaptiveBand(y, amplitude, contactBand);
+    const threshold = ground - amplitude * band;
+
+    const velocity = Signal.derivative(y, dtMs / 1000);
+    const conf = (idx) => Events._confidence(track, velocity, idx);
+
+    let events = [
+      ...Signal.crossings(y, threshold, true).map((idx) => ({
+        foot: track.foot,
+        kind: "IC",
+        tMs: idx * dtMs,
+        confidence: conf(idx),
+      })),
+      ...Signal.crossings(y, threshold, false).map((idx) => ({
+        foot: track.foot,
+        kind: "TO",
+        tMs: idx * dtMs,
+        confidence: conf(idx),
+      })),
+    ];
+
+    events.sort((a, b) => a.tMs - b.tMs);
+    events = Events._mergeShortGaps(events, MIN_SWING_MS);
+    return Events._dropShortContacts(events, minContactMs);
+  },
+
+  _confidence(track, velocity, idx) {
+    const i = Math.min(Math.trunc(idx), velocity.length - 1);
+    const kpConf = track.confidence && i < track.confidence.length ? track.confidence[i] : 1;
+    const speed = Math.abs(velocity[i]);
+    const reference = Math.max(...velocity.map(Math.abs)) || 1;
+    const sharpness = reference ? Math.min(1, speed / (reference * 0.1)) : 0;
+    return Math.round(kpConf * (0.5 + 0.5 * sharpness) * 1e4) / 1e4;
+  },
+
+  /**
+   * 把單腳觸地期間的短暫掉格補回去。
+   *
+   * 物理約束：一隻腳離地後必須向前擺盪再落下，不可能在幾毫秒內回到地面。
+   * 不會誤刪真正的騰空——真正的騰空發生在不同腳之間，這裡只看單腳序列。
+   */
+  _mergeShortGaps(events, minSwingMs) {
+    const kept = [];
+    let i = 0;
+    while (i < events.length) {
+      const cur = events[i];
+      const next = events[i + 1];
+      if (cur.kind === "TO" && next && next.kind === "IC" && next.tMs - cur.tMs < minSwingMs) {
+        i += 2;
+        continue;
+      }
+      kept.push(cur);
+      i += 1;
+    }
+    return kept;
+  },
+
+  _dropShortContacts(events, minContactMs) {
+    const kept = [];
+    let i = 0;
+    while (i < events.length) {
+      const cur = events[i];
+      const next = events[i + 1];
+      if (cur.kind === "IC" && next && next.kind === "TO" && next.tMs - cur.tMs < minContactMs) {
+        i += 2;
+        continue;
+      }
+      kept.push(cur);
+      i += 1;
+    }
+    return kept;
+  },
+
+  /**
+   * 配對成觸地區間。只取完整的 IC→TO。
+   *
+   * 影片開頭已踩在地上、或結尾還沒抬腳的半段，無法得知真正起訖時間，
+   * 寧可捨棄也不要猜。
+   */
+  toContacts(events, foot) {
+    const intervals = [];
+    let pending = null;
+    for (const ev of events) {
+      if (ev.foot !== foot) continue;
+      if (ev.kind === "IC") pending = ev.tMs;
+      else if (ev.kind === "TO" && pending !== null) {
+        intervals.push({ foot, startMs: pending, endMs: ev.tMs, durationMs: ev.tMs - pending });
+        pending = null;
+      }
+    }
+    return intervals;
+  },
+};
+
+// -------------------------------------------------------------- Features
+
+const Features = {
+  /** 合併成「至少有一腳在地面」的區間。 */
+  mergeContacts(contacts) {
+    if (!contacts.length) return [];
+    const spans = contacts.map((c) => [c.startMs, c.endMs]).sort((a, b) => a[0] - b[0]);
+    const merged = [[...spans[0]]];
+    for (const [start, end] of spans.slice(1)) {
+      if (start <= merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], end);
+      } else {
+        merged.push([start, end]);
+      }
+    }
+    return merged;
+  },
+
+  /**
+   * 雙腳皆離地的區間。
+   *
+   * 只取被兩側觸地夾住的空隙——序列最前與最後的空檔可能只是影片還沒
+   * 拍到腳，不是真的騰空。
+   */
+  findFlights(contacts, cap, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+    const merged = Features.mergeContacts(contacts);
+    const flights = [];
+    for (let i = 0; i + 1 < merged.length; i++) {
+      const startMs = merged[i][1];
+      const endMs = merged[i + 1][0];
+      const durationMs = endMs - startMs;
+      if (durationMs <= 0) continue;
+      flights.push({
+        startMs,
+        endMs,
+        durationMs,
+        verdict: Capability.flightVerdict(durationMs, cap, thresholdMs),
+      });
+    }
+    return flights;
+  },
+
+  /** 步頻（每分鐘步數），由相鄰觸地起點間隔的中位數推算。 */
+  cadenceSpm(contacts) {
+    const starts = contacts.map((c) => c.startMs).sort((a, b) => a - b);
+    if (starts.length < 2) return null;
+    const gaps = [];
+    for (let i = 0; i + 1 < starts.length; i++) gaps.push(starts[i + 1] - starts[i]);
+    gaps.sort((a, b) => a - b);
+    const mid = Math.floor(gaps.length / 2);
+    const median = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2;
+    if (median <= 0) return null;
+    return Math.round((60000 / median) * 100) / 100;
+  },
+
+  /**
+   * 膝關節角度（度）。180° 為完全伸直。
+   *
+   * 回傳 null 表示關鍵點無效或肢段長度為零——此時不該猜一個數字出來。
+   */
+  kneeAngle(hip, knee, ankle) {
+    for (const p of [hip, knee, ankle]) {
+      if (!p || (p.confidence !== undefined && p.confidence <= 0)) return null;
+    }
+    const ux = hip.x - knee.x;
+    const uy = hip.y - knee.y;
+    const vx = ankle.x - knee.x;
+    const vy = ankle.y - knee.y;
+    const nu = Math.hypot(ux, uy);
+    const nv = Math.hypot(vx, vy);
+    if (nu === 0 || nv === 0) return null;
+    const cosine = Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (nu * nv)));
+    return (Math.acos(cosine) * 180) / Math.PI;
+  },
+
+  /**
+   * 髖關節通過踝關節正上方的影格索引（垂直支撐位置）。
+   *
+   * 這是 TR54 彎膝規則的區間終點：前導腳自觸地起到通過身體垂直位置為止。
+   */
+  verticalSupportIndex(hips, ankles, startIdx) {
+    const n = Math.min(hips.length, ankles.length) - 1;
+    for (let i = Math.max(0, startIdx); i < n; i++) {
+      const cur = hips[i].x - ankles[i].x;
+      const nxt = hips[i + 1].x - ankles[i + 1].x;
+      if (cur === 0 || cur * nxt < 0) return i;
+    }
+    return null;
+  },
+
+  /** 觸地到通過垂直支撐位置期間的最小膝角。 */
+  minKneeAngleDuringSupport(hips, knees, ankles, startIdx, endIdx) {
+    const angles = [];
+    const end = Math.min(endIdx + 1, knees.length);
+    for (let i = Math.max(0, startIdx); i < end; i++) {
+      const a = Features.kneeAngle(hips[i], knees[i], ankles[i]);
+      if (a !== null) angles.push(a);
+    }
+    return angles.length ? Math.min(...angles) : null;
+  },
+
+  buildReport(fps, contacts, cap, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+    const notes = [];
+    if (!cap.flightTimeReliable) {
+      notes.push(
+        `幀率 ${formatNum(fps)} fps 低於騰空判定所需的 120 fps，` +
+          `騰空時間僅供參考，不可作為任何判讀依據。`
+      );
+    }
+    if (!contacts.length) {
+      notes.push("未偵測到任何完整的觸地區間，請檢查追蹤與姿態估計的結果。");
+    }
+    return {
+      fps,
+      contacts,
+      flights: Features.findFlights(contacts, cap, thresholdMs),
+      cadenceSpm: Features.cadenceSpm(contacts),
+      notes,
+    };
+  },
+};
+
+// ----------------------------------------------------------------- Synth
+
+const SWING_SHARPNESS = 0.6;
+
+/** 可重現的亂數（移植驗證需要與 Python 無關的自有序列）。 */
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return () => {
+    t = (t + 0x6d2b79f5) >>> 0;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const Synth = {
+  /** 合成左右腳軌跡與真值觸地區間，供驗證與示範使用。 */
+  tracks({
+    fps = 240,
+    nCycles = 4,
+    contactMs = 300,
+    flightMs = 30,
+    ground = 500,
+    amplitude = 120,
+    noisePx = 0,
+    seed = 0,
+  } = {}) {
+    const rand = mulberry32(seed);
+    const gauss = () => {
+      const u = Math.max(rand(), 1e-12);
+      return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand());
+    };
+
+    const period = contactMs + flightMs;
+    const swingMs = contactMs + 2 * flightMs;
+    const leadMs = swingMs;
+
+    const left = [];
+    const right = [];
+    for (let k = 0; k < nCycles; k++) {
+      const base = 2 * k * period + leadMs;
+      left.push([base, base + contactMs]);
+      right.push([base + period, base + period + contactMs]);
+    }
+
+    const durationMs = right[right.length - 1][1] + swingMs;
+
+    const trajectory = (schedule, foot) => {
+      const dtMs = 1000 / fps;
+      const nFrames = Math.trunc(durationMs / dtMs) + 1;
+      const firstStart = schedule[0][0];
+      const lastEnd = schedule[schedule.length - 1][1];
+      const y = [];
+
+      for (let i = 0; i < nFrames; i++) {
+        const t = i * dtMs;
+        let value = ground;
+
+        if (!schedule.some(([s, e]) => s <= t && t <= e)) {
+          const ends = schedule.filter(([, e]) => e <= t).map(([, e]) => e);
+          const starts = schedule.filter(([s]) => s >= t).map(([s]) => s);
+          const prevEnd = ends.length ? Math.max(...ends) : firstStart - swingMs;
+          const nextStart = starts.length ? Math.min(...starts) : lastEnd + swingMs;
+          if (nextStart > prevEnd) {
+            // 夾在 [0,1]：虛擬擺動期可能讓 t 落在區間外，sin 為負時取分數次方會是 NaN
+            const u = Math.min(1, Math.max(0, (t - prevEnd) / (nextStart - prevEnd)));
+            value = ground - amplitude * Math.sin(Math.PI * u) ** SWING_SHARPNESS;
+          }
+        }
+
+        if (noisePx) value += gauss() * noisePx;
+        y.push(value);
+      }
+      return { foot, y, confidence: new Array(y.length).fill(1) };
+    };
+
+    const truth = [
+      ...left.map(([s, e]) => ({ foot: "L", startMs: s, endMs: e })),
+      ...right.map(([s, e]) => ({ foot: "R", startMs: s, endMs: e })),
+    ].sort((a, b) => a.startMs - b.startMs);
+
+    return { left: trajectory(left, "L"), right: trajectory(right, "R"), truth };
+  },
+};
+
+// ------------------------------------------------------------- 管線入口
+
+/** 由左右腳軌跡跑完 N6 → N7，回傳完整報告。 */
+function analyseTracks(left, right, fps, thresholdMs = DEFAULT_VISIBILITY_THRESHOLD_MS) {
+  const detected = [...Events.detect(left, fps), ...Events.detect(right, fps)];
+  const contacts = [...Events.toContacts(detected, "L"), ...Events.toContacts(detected, "R")].sort(
+    (a, b) => a.startMs - b.startMs
+  );
+  return Features.buildReport(fps, contacts, Capability.assess(fps), thresholdMs);
+}
+
+function formatNum(v) {
+  return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)));
+}
+
+
+// ==================================================================== app
+
+const MODEL_URL =
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/" +
+  "pose_landmarker_full/float16/1/pose_landmarker_full.task";
+const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+
+// MediaPipe Pose 的 33 個關鍵點裡我們需要的幾個
+const LM = {
+  L: { hip: 23, knee: 25, ankle: 27, heel: 29, toe: 31 },
+  R: { hip: 24, knee: 26, ankle: 28, heel: 30, toe: 32 },
+};
+
+// 把核心演算法掛到 window 上：module scope 的宣告不是全域，外部無從取用。
+// 這是刻意提供的介面，讓自動化測試能驗證頁面內的實作與 Python 一致，
+// 也方便想自己寫分析腳本的人在 console 直接呼叫。
+window.racewalk = {
+  Signal, Capability, Events, Features, Synth, analyseTracks, render,
+  DEFAULT_VISIBILITY_THRESHOLD_MS,
+};
+
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+let landmarker = null;
+let measuredFps = null;
+
+const showError = (msg) => {
+  $("error").textContent = msg;
+  $("error").hidden = false;
+};
+const clearError = () => { $("error").hidden = true; };
+
+// ------------------------------------------------------------ 影片載入
+
+$("file").addEventListener("change", async (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  clearError();
+
+  video.src = URL.createObjectURL(file);
+  video.hidden = false;
+
+  await new Promise((resolve, reject) => {
+    video.onloadedmetadata = resolve;
+    video.onerror = () => reject(new Error("無法讀取這個影片檔"));
+  }).catch((e) => showError(e.message));
+
+  $("fileInfo").textContent =
+    `${file.name} — ${video.videoWidth}x${video.videoHeight}, ${video.duration.toFixed(2)} 秒`;
+  $("fileInfo").hidden = false;
+
+  $("stepFps").hidden = false;
+  $("stepRange").hidden = false;
+  $("dur").max = Math.min(10, video.duration);
+
+  await autoMeasureFps();
+});
+
+/**
+ * 以 requestVideoFrameCallback 判讀幀率。
+ *
+ * 用極慢的播放速度（0.1x）是必要的：240 fps 的影片在 60 Hz 螢幕上正常播放時，
+ * 瀏覽器每秒只呈現 60 格、其餘直接跳過，rVFC 量到的會是 60 fps 而不是 240。
+ * 放慢之後每一格都來得及呈現，mediaTime 的間隔才是真正的影格間隔。
+ */
+async function measureFpsViaPlayback() {
+  if (!("requestVideoFrameCallback" in HTMLVideoElement.prototype)) return null;
+
+  const times = [];
+  const NEEDED = 24;
+
+  video.currentTime = Math.min(0.2, video.duration * 0.1);
+  video.playbackRate = 0.1;
+
+  await new Promise((resolve) => {
+    const onFrame = (_now, meta) => {
+      times.push(meta.mediaTime);
+      if (times.length >= NEEDED) { resolve(); return; }
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+    video.play().catch(() => resolve());
+    setTimeout(resolve, 8000); // 保險，避免永遠等下去
+  });
+
+  video.pause();
+  video.playbackRate = 1;
+
+  const deltas = [];
+  for (let i = 1; i < times.length; i++) {
+    const d = times[i] - times[i - 1];
+    if (d > 1e-6) deltas.push(d);
+  }
+  if (deltas.length < 5) return null;
+
+  deltas.sort((a, b) => a - b);
+  const median = deltas[Math.floor(deltas.length / 2)];
+  return median > 0 ? 1 / median : null;
+}
+
+async function autoMeasureFps() {
+  $("fpsStatus").textContent = "判讀幀率中…";
+  try {
+    measuredFps = await measureFpsViaPlayback();
+  } catch {
+    measuredFps = null;
+  }
+
+  if (measuredFps) {
+    const rounded = Math.round(measuredFps * 1000) / 1000;
+    $("fps").value = rounded;
+    $("fpsStatus").textContent =
+      `自動判讀：約 ${rounded} fps（依影格間隔推算，請對照你拍攝時的設定）`;
+  } else {
+    $("fps").value = $("fps").value || 240;
+    $("fpsStatus").textContent =
+      "無法自動判讀幀率，請手動輸入你拍攝時的設定值。這個值錯了，所有毫秒數都會跟著錯。";
+  }
+  updateTier();
+}
+
+$("measure").addEventListener("click", autoMeasureFps);
+$("fps").addEventListener("input", updateTier);
+$("start").addEventListener("input", updateTier);
+$("dur").addEventListener("input", updateTier);
+
+function currentFps() {
+  const v = parseFloat($("fps").value);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+
+function updateTier() {
+  const fps = currentFps();
+  const box = $("tier");
+  if (!fps) { box.textContent = "請輸入有效的幀率。"; box.className = "tierbox"; return; }
+
+  const cap = Capability.assess(fps);
+  box.className = `tierbox ${cap.tier}`;
+  box.textContent = Capability.describe(cap);
+
+  const dur = parseFloat($("dur").value) || 0;
+  $("frameEstimate").textContent = `約需處理 ${Math.round(dur * fps)} 個影格`;
+}
+
+// -------------------------------------------------------- 影格擷取 + 姿態
+
+function seekTo(t) {
+  return new Promise((resolve, reject) => {
+    const done = () => { cleanup(); resolve(); };
+    const bad = () => { cleanup(); reject(new Error("影片 seek 失敗")); };
+    const cleanup = () => {
+      video.removeEventListener("seeked", done);
+      video.removeEventListener("error", bad);
+    };
+    video.addEventListener("seeked", done);
+    video.addEventListener("error", bad);
+    video.currentTime = t;
+  });
+}
+
+async function ensureLandmarker() {
+  if (landmarker) return landmarker;
+
+  let FilesetResolver, PoseLandmarker;
+  try {
+    ({ FilesetResolver, PoseLandmarker } = await import(MEDIAPIPE_URL));
+  } catch {
+    throw new Error(
+      "無法載入 MediaPipe 姿態估計模組。這台電腦需要能連上 cdn.jsdelivr.net；" +
+      "首次使用必須連網，模型下載後瀏覽器會快取"
+    );
+  }
+
+  const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+  landmarker = await PoseLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+    runningMode: "VIDEO",
+    numPoses: 1,
+  });
+  return landmarker;
+}
+
+/** 逐格擷取並跑姿態估計，回傳左右腳軌跡與下肢關鍵點序列。 */
+async function extract(fps, startS, durationS, onProgress) {
+  const model = await ensureLandmarker();
+  const dtMs = 1000 / fps;
+  const nFrames = Math.floor(durationS * fps);
+  const H = video.videoHeight;
+  const W = video.videoWidth;
+
+  const out = {
+    left: { foot: "L", y: [], confidence: [] },
+    right: { foot: "R", y: [], confidence: [] },
+    joints: { L: { hip: [], knee: [], ankle: [] }, R: { hip: [], knee: [], ankle: [] } },
+    missing: 0,
+    distinctTimes: new Set(),
+  };
+
+  for (let i = 0; i < nFrames; i++) {
+    const t = startS + i / fps;
+    if (t >= video.duration) break;
+
+    await seekTo(t);
+    out.distinctTimes.add(video.currentTime.toFixed(6));
+
+    // 時間戳必須嚴格遞增，否則 MediaPipe 會拒絕
+    const res = model.detectForVideo(video, Math.round(i * dtMs) + 1);
+    const lm = res.landmarks?.[0];
+
+    for (const side of ["L", "R"]) {
+      const k = LM[side];
+      const target = side === "L" ? out.left : out.right;
+
+      if (!lm) {
+        // 沒偵測到人：沿用上一格，並把信心度歸零，讓下游知道這格不可信
+        target.y.push(target.y.length ? target.y[target.y.length - 1] : 0);
+        target.confidence.push(0);
+        for (const j of ["hip", "knee", "ankle"]) {
+          out.joints[side][j].push({ x: 0, y: 0, confidence: 0 });
+        }
+        continue;
+      }
+
+      // 腳的最低點（影像座標 y 向下為正）
+      const heel = lm[k.heel];
+      const toe = lm[k.toe];
+      target.y.push(Math.max(heel.y, toe.y) * H);
+      target.confidence.push(Math.min(heel.visibility ?? 1, toe.visibility ?? 1));
+
+      for (const j of ["hip", "knee", "ankle"]) {
+        const p = lm[k[j]];
+        out.joints[side][j].push({ x: p.x * W, y: p.y * H, confidence: p.visibility ?? 1 });
+      }
+    }
+
+    if (!lm) out.missing += 1;
+    if (i % 5 === 0) onProgress(i + 1, nFrames);
+  }
+
+  onProgress(nFrames, nFrames);
+  return out;
+}
+
+// ---------------------------------------------------------------- 執行
+
+$("run").addEventListener("click", async () => {
+  clearError();
+  const fps = currentFps();
+  if (!fps) { showError("請先輸入有效的幀率。"); return; }
+
+  const startS = parseFloat($("start").value) || 0;
+  const durationS = parseFloat($("dur").value) || 2.5;
+
+  $("run").disabled = true;
+  $("results").hidden = true;
+  $("stepProgress").hidden = false;
+  $("progressText").textContent = "載入姿態模型…";
+  $("bar").value = 0;
+
+  try {
+    const data = await extract(fps, startS, durationS, (done, total) => {
+      $("bar").value = (done / total) * 100;
+      $("progressText").textContent = `姿態估計 ${done} / ${total} 影格`;
+    });
+
+    const report = analyseTracks(data.left, data.right, fps);
+    render(report, data, fps);
+    $("results").hidden = false;
+  } catch (e) {
+    showError(
+      `分析失敗：${e.message}。` +
+      `若訊息與網路或模型載入有關，請確認這台電腦可以連上 cdn.jsdelivr.net 與 storage.googleapis.com。`
+    );
+  } finally {
+    $("run").disabled = false;
+    $("stepProgress").hidden = true;
+  }
+});
+
+// ---------------------------------------------------------------- 呈現
+
+function render(report, data, fps) {
+  const cap = Capability.assess(fps);
+  const box = $("resultTier");
+  box.className = `tierbox ${cap.tier}`;
+  box.textContent = Capability.describe(cap);
+
+  const contactAvg = report.contacts.length
+    ? report.contacts.reduce((s, c) => s + c.durationMs, 0) / report.contacts.length
+    : null;
+  const flightAvg = report.flights.length
+    ? report.flights.reduce((s, f) => s + f.durationMs, 0) / report.flights.length
+    : null;
+
+  const tiles = [
+    ["觸地次數", report.contacts.length, ""],
+    ["平均觸地", contactAvg === null ? "—" : contactAvg.toFixed(1), "ms"],
+    ["騰空次數", cap.flightTimeReliable ? report.flights.length : "—", ""],
+    ["平均騰空", cap.flightTimeReliable && flightAvg !== null ? flightAvg.toFixed(1) : "—", "ms"],
+    ["步頻", report.cadenceSpm === null ? "—" : report.cadenceSpm.toFixed(0), "步/分"],
+  ];
+  $("tiles").innerHTML = tiles
+    .map(([k, v, unit]) => `<div class="tile"><dt>${k}</dt><dd>${v}${unit ? ` <small>${unit}</small>` : ""}</dd></div>`)
+    .join("");
+
+  drawTimeline(report, cap);
+  renderFlights(report, cap);
+  renderContacts(report, data, fps);
+
+  const notes = [...report.notes];
+  const expected = Math.floor((parseFloat($("dur").value) || 0) * fps);
+  if (data.distinctTimes.size < expected * 0.9 && expected > 0) {
+    notes.push(
+      `擷取到的不重複影格只有 ${data.distinctTimes.size} 格，少於預期的 ${expected} 格。` +
+      `這通常代表輸入的幀率高於影片的實際幀率，量出來的毫秒數會偏離真值——請重新確認幀率。`
+    );
+  }
+  if (data.missing > 0) {
+    notes.push(`有 ${data.missing} 格沒有偵測到人體，這些影格的關鍵點信心度已設為 0。`);
+  }
+  $("notes").innerHTML = notes.map((n) => `<div class="note">${n}</div>`).join("");
+}
+
+function drawTimeline(report, cap) {
+  const svg = $("timeline");
+  const all = [...report.contacts.map((c) => c.endMs), ...report.flights.map((f) => f.endMs)];
+  const tMax = all.length ? Math.max(...all) : 1;
+  const x0 = 56, x1 = 872;
+  const X = (ms) => x0 + (ms / tMax) * (x1 - x0);
+
+  const rowY = { L: 46, R: 86 };
+  const parts = [];
+
+  for (const side of ["L", "R"]) {
+    parts.push(
+      `<text x="${x0 - 10}" y="${rowY[side] + 15}" text-anchor="end" fill="var(--ink-2)" ` +
+      `font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600">${side} 腳</text>`
+    );
+    parts.push(
+      `<line x1="${x0}" y1="${rowY[side] + 11}" x2="${x1}" y2="${rowY[side] + 11}" ` +
+      `stroke="var(--rule)" stroke-width="1"/>`
+    );
+  }
+
+  for (const c of report.contacts) {
+    const w = Math.max(1.5, X(c.endMs) - X(c.startMs));
+    parts.push(
+      `<rect x="${X(c.startMs)}" y="${rowY[c.foot]}" width="${w}" height="22" ` +
+      `fill="var(--${c.foot === "L" ? "left" : "right"})" rx="1"><title>${c.foot} 腳觸地 ` +
+      `${c.durationMs.toFixed(1)} ms</title></rect>`
+    );
+  }
+
+  if (cap.flightTimeReliable) {
+    parts.push(
+      `<text x="${x0 - 10}" y="141" text-anchor="end" fill="var(--ink-2)" ` +
+      `font-family="IBM Plex Mono, monospace" font-size="12.5" font-weight="600">騰空</text>`
+    );
+    for (const f of report.flights) {
+      const w = Math.max(2, X(f.endMs) - X(f.startMs));
+      const colour = f.verdict === "suspected" ? "var(--danger)"
+        : f.verdict === "within_tolerance" ? "var(--ok)" : "var(--accent)";
+      parts.push(
+        `<rect x="${X(f.startMs)}" y="126" width="${w}" height="20" fill="${colour}" rx="1">` +
+        `<title>騰空 ${f.durationMs.toFixed(1)} ms — ${f.verdict}</title></rect>`
+      );
+    }
+  }
+
+  // 時間軸
+  parts.push(`<line x1="${x0}" y1="164" x2="${x1}" y2="164" stroke="var(--ink-2)" stroke-width="1.2"/>`);
+  const ticks = 6;
+  for (let i = 0; i <= ticks; i++) {
+    const ms = (tMax / ticks) * i;
+    parts.push(`<line x1="${X(ms)}" y1="164" x2="${X(ms)}" y2="170" stroke="var(--ink-2)" stroke-width="1.2"/>`);
+    parts.push(
+      `<text x="${X(ms)}" y="185" text-anchor="middle" fill="var(--ink-2)" ` +
+      `font-family="IBM Plex Mono, monospace" font-size="11">${Math.round(ms)}</text>`
+    );
+  }
+  parts.push(
+    `<text x="${x1}" y="26" text-anchor="end" fill="var(--ink-3)" ` +
+    `font-family="IBM Plex Mono, monospace" font-size="11">毫秒</text>`
+  );
+
+  svg.innerHTML = parts.join("");
+}
+
+const VERDICT_TEXT = {
+  suspected: "疑似，待複核",
+  within_tolerance: "門檻內",
+  inconclusive: "誤差跨越門檻",
+  unreliable: "幀率不足",
+};
+
+function renderFlights(report, cap) {
+  const table = $("flightTable");
+  if (!cap.flightTimeReliable) {
+    table.innerHTML =
+      `<tbody><tr><td>幀率不足，未輸出騰空時間。低於 120 fps 的影片量出來的毫秒數` +
+      `誤差可能與被量的量同一個數量級，給出數字反而會誤導判讀。</td></tr></tbody>`;
+    return;
+  }
+  if (!report.flights.length) {
+    table.innerHTML = `<tbody><tr><td>未偵測到騰空區間。</td></tr></tbody>`;
+    return;
+  }
+
+  const rows = report.flights.map((f, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td class="num">${f.startMs.toFixed(1)} → ${f.endMs.toFixed(1)}</td>
+      <td class="num">${f.durationMs.toFixed(1)} ± ${cap.flightUncertaintyMs.toFixed(1)}</td>
+      <td><span class="verdict ${f.verdict}">${VERDICT_TEXT[f.verdict]}</span></td>
+    </tr>`).join("");
+
+  table.innerHTML =
+    `<thead><tr><th>#</th><th>區間 (ms)</th><th>騰空 (ms)</th>` +
+    `<th>對照 ${DEFAULT_VISIBILITY_THRESHOLD_MS} ms 門檻</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+function renderContacts(report, data, fps) {
+  const dtMs = 1000 / fps;
+
+  const rows = report.contacts.map((c, i) => {
+    const side = c.foot;
+    const j = data.joints[side];
+    const startIdx = Math.round(c.startMs / dtMs);
+    const supportIdx = Features.verticalSupportIndex(j.hip, j.ankle, startIdx);
+    const endIdx = supportIdx ?? Math.round(c.endMs / dtMs);
+    const minKnee = Features.minKneeAngleDuringSupport(j.hip, j.knee, j.ankle, startIdx, endIdx);
+
+    return `
+      <tr>
+        <td class="num">${i + 1}</td>
+        <td class="num">${side}</td>
+        <td class="num">${c.startMs.toFixed(1)} → ${c.endMs.toFixed(1)}</td>
+        <td class="num">${c.durationMs.toFixed(1)}</td>
+        <td class="num">${minKnee === null ? "—" : minKnee.toFixed(1) + "°"}</td>
+      </tr>`;
+  }).join("");
+
+  $("contactTable").innerHTML =
+    `<thead><tr><th>#</th><th>腳</th><th>區間 (ms)</th><th>觸地 (ms)</th>` +
+    `<th>最小膝角</th></tr></thead><tbody>${rows}</tbody>`;
+}
+</script>
+</body>
+</html>
