@@ -10,7 +10,7 @@
 <body>
 <header class="topbar">
   <div><div class="eyebrow">RACEWALK LAB 3.0 · CHATGPT REBUILD</div><h1>宥蓁競走動作分析</h1></div>
-  <div class="badges"><span id="engineBadge">AI 尚未載入</span><span>影片只在本機處理</span></div>
+  <div class="badges"><span id="engineBadge">AI 自動載入中</span><span>影片只在本機處理</span></div>
 </header>
 <nav class="tabs" aria-label="主選單">
   <button class="tab active" data-tab="analyze">分析工作台</button>
@@ -33,12 +33,12 @@
       </div>
       <div class="switchrow"><label><input id="uncertaintyEnabled" type="checkbox" checked> 啟用角度誤差模擬</label><label>點位 σ <input id="sigmaPx" type="number" min="0" max="10" step="0.5" value="2"> px</label></div>
       <div class="switchrow"><label><input id="showSkeleton" type="checkbox" checked> 骨架</label><label><input id="showRefs" type="checkbox" checked> 身體參考線</label><label><input id="showAllPeople" type="checkbox" checked> 顯示所有偵測人物</label></div>
-      <div class="dropzone"><input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm"><strong>匯入競走影片</strong><small>MP4 / MOV / WebM，原始影片不會提交到 GitHub</small></div>
-      <div class="actions"><button id="initAi" class="primary">載入 AI</button><button id="analyzeBtn" class="primary" disabled>開始分析</button><button id="stopBtn" disabled>停止</button></div>
-      <div class="progress"><div id="progressBar"></div></div><p id="status" class="status">等待影片。</p>
+      <div class="dropzone"><input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm"><strong>匯入競走影片</strong><small>MP4 / MOV / WebM；選片後會自動確認 AI，原始影片不會提交到 GitHub</small></div>
+      <div class="actions"><button id="initAi" class="primary">AI 載入中…</button><button id="analyzeBtn" class="primary" disabled>開始 AI 分析</button><button id="stopBtn" disabled>停止</button></div>
+      <div class="progress"><div id="progressBar"></div></div><p id="status" class="status">正在自動載入 AI 模型，完成後即可選影片分析。</p>
     </article>
     <article class="card viewerCard">
-      <div class="viewerHead"><div><h2>02 Judge View</h2><small>先點選目標選手，再開始分析；多人同框可顯示最多 6 人。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
+      <div class="viewerHead"><div><h2>02 Judge View</h2><small>選影片 → 點選目標選手 → 開始 AI 分析；多人同框可顯示最多 6 人。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
       <div id="stage" class="stage"><video id="video" playsinline controls></video><canvas id="overlay"></canvas><div id="clickHint">點一下要追蹤的選手</div></div>
       <div class="timeline"><input id="timeSlider" type="range" min="0" max="0" value="0" step="0.001"><span id="timeText">00:00.000</span></div>
       <div class="actions compact"><button id="prevFrame">◀ 1格</button><button id="nextFrame">1格 ▶</button><button id="manualToggle">人工修點：關</button><select id="manualJoint"><option value="25">左膝</option><option value="27">左踝</option><option value="23">左髖</option><option value="26">右膝</option><option value="28">右踝</option><option value="24">右髖</option></select></div>
@@ -56,4 +56,5 @@
 </main>
 <footer>RaceWalk Lab 3.0 · Clean ChatGPT rebuild · No Claude source code reused</footer>
 <script type="module" src="./app.js"></script>
+<script type="module" src="./autostart.js"></script>
 </body></html>
