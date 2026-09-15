@@ -195,9 +195,114 @@ function drawFrame(frame){
 }
 function drawPose(lm,w,h,alpha,lineWidth){octx.save();octx.globalAlpha=alpha;octx.strokeStyle='#38bdf8';octx.fillStyle='#f8fafc';octx.lineWidth=lineWidth;for(const [a,b] of LINKS){const p=lm[a],q=lm[b];if(!p||!q||(p.visibility??1)<.2||(q.visibility??1)<.2)continue;octx.beginPath();octx.moveTo(p.x*w,p.y*h);octx.lineTo(q.x*w,q.y*h);octx.stroke();}for(const i of [11,12,23,24,25,26,27,28,29,30,31,32]){const p=lm[i];if(!p||(p.visibility??1)<.2)continue;octx.beginPath();octx.arc(p.x*w,p.y*h,p.manual?6:3.5,0,Math.PI*2);octx.fill();}const b=bboxFromLandmarks(lm);if(b){octx.strokeStyle=alpha<1?'#94a3b8':'#f59e0b';octx.strokeRect(b.x1*w,b.y1*h,(b.x2-b.x1)*w,(b.y2-b.y1)*h);}octx.restore();}
 function drawRefs(lm,w,h){octx.save();octx.strokeStyle='#f43f5e';octx.lineWidth=2;for(const [a,b] of [[11,12],[23,24]])if(lm[a]&&lm[b]){octx.beginPath();octx.moveTo(lm[a].x*w,lm[a].y*h);octx.lineTo(lm[b].x*w,lm[b].y*h);octx.stroke();}if(lm[11]&&lm[12]&&lm[23]&&lm[24]){octx.beginPath();octx.moveTo((lm[11].x+lm[12].x)/2*w,(lm[11].y+lm[12].y)/2*h);octx.lineTo((lm[23].x+lm[24].x)/2*w,(lm[23].y+lm[24].y)/2*h);octx.stroke();}octx.restore();}
-function drawChart(){const dpr=devicePixelRatio||1,w=chart.clientWidth||600,h=260;chart.width=Math.round(w*dpr);chart.height=Math.round(h*dpr);cctx.setTransform(dpr,0,0,dpr,0,0);cctx.clearRect(0,0,w,h);cctx.fillStyle='#fbfdff';cctx.fillRect(0,0,w,h);cctx.strokeStyle='#e2e8f0';cctx.lineWidth=1;for(const a of [120,140,160,180]){const y=mapY(a,h);cctx.beginPath();cctx.moveTo(36,y);cctx.lineTo(w-8,y);cctx.stroke();cctx.fillStyle='#64748b';cctx.font='11px system-ui';cctx.fillText(String(a),4,y+4);}if(state.frames.length<2)return;drawBand('leftKnee','#0f766e33',w,h);drawBand('rightKnee','#7c3aed22',w,h);drawLine('leftKnee','#0f766e',w,h);drawLine('rightKnee','#7c3aed',w,h);const x=36+video.currentTime/(video.duration||1)*(w-44);cctx.strokeStyle='#ef4444';cctx.beginPath();cctx.moveTo(x,8);cctx.lineTo(x,h-20);cctx.stroke();}
-function mapY(a,h){return 8+(180-(a??180))/70*(h-36);}
-function drawLine(key,color,w,h){cctx.strokeStyle=color;cctx.lineWidth=2;cctx.beginPath();let started=false;for(const f of state.frames){const v=f.metrics?.[key]?.value;if(v==null){started=false;continue;}const x=36+f.t/(video.duration||1)*(w-44),y=mapY(v,h);if(!started){cctx.moveTo(x,y);started=true;}else cctx.lineTo(x,y);}cctx.stroke();}
+// ---- 03 角度曲線 -------------------------------------------------------
+// 曲線本身不會告訴人要看什麼。TR54 只管「觸地到通過垂直位置」那一段的膝角，
+// 擺動期彎膝是正常動作；而沒配對到的影格是留白，不是「角度正常」。
+// 這些都畫在圖上，否則一條線看不出可以判斷什麼。
+const CHART_H=300,CHART_TOP=10,CHART_BOT=56,A_MIN=90,A_MAX=182;
+const BAND_INK={'below-reported':'#475569','at-threshold':'#b45309','above-threshold':'#b91c1c'};
+const BAND_FILL={'below-reported':'#47556922','at-threshold':'#b4530922','above-threshold':'#b91c1c22'};
+const chartX=(t,w)=>36+(t/(video.duration||1))*(w-44);
+const chartTime=(px,w)=>{const d=video.duration||0;return Math.max(0,Math.min(d,((px-36)/Math.max(1,w-44))*d));};
+function mapY(a,h){const v=Math.max(A_MIN,Math.min(A_MAX,a??A_MAX));return CHART_TOP+(A_MAX-v)/(A_MAX-A_MIN)*(h-CHART_TOP-CHART_BOT);}
+function drawLine(key,color,w,h){cctx.strokeStyle=color;cctx.lineWidth=2;cctx.beginPath();let started=false;for(const f of state.frames){const v=f.metrics?.[key]?.value;if(v==null){started=false;continue;}const x=chartX(f.t,w),y=mapY(v,h);if(!started){cctx.moveTo(x,y);started=true;}else cctx.lineTo(x,y);}cctx.stroke();}
+function frameRuns(predicate){const runs=[];let run=null;for(const f of state.frames){if(predicate(f)){if(!run){run={a:f.t,b:f.t};runs.push(run);}run.b=f.t;}else run=null;}return runs;}
+// 沒有可靠配對的影格：線只是斷掉，跟「角度正常」長得一樣，所以要畫出來。
+function drawGaps(w,h){
+ const top=CHART_TOP,bottom=h-CHART_BOT;
+ for(const run of frameRuns(f=>!f.landmarks)){
+  const x1=chartX(run.a,w),x2=Math.max(x1+1.5,chartX(run.b,w));
+  cctx.fillStyle='#e2e8f0aa';cctx.fillRect(x1,top,x2-x1,bottom-top);
+  cctx.save();cctx.beginPath();cctx.rect(x1,top,x2-x1,bottom-top);cctx.clip();
+  cctx.strokeStyle='#cbd5e1';cctx.lineWidth=1;
+  for(let d=-(bottom-top);d<x2-x1;d+=7){cctx.beginPath();cctx.moveTo(x1+d,bottom);cctx.lineTo(x1+d+(bottom-top),top);cctx.stroke();}
+  cctx.restore();
+ }
+}
+// TR54 彎膝規則只看這一段。擺動期的最小值與規則無關，不該拿來判讀。
+function drawSupportPhases(w,h){
+ const knee=state.report?.supportKnee;if(!knee)return;
+ const top=CHART_TOP,bottom=h-CHART_BOT;
+ for(const [side,fill,ink] of [['left','#0f766e14','#0f766e'],['right','#7c3aed14','#7c3aed']]){
+  for(const phase of knee[side]||[]){
+   if(phase.startTime==null||phase.endTime==null)continue;
+   const x1=chartX(phase.startTime,w),x2=Math.max(x1+2,chartX(phase.endTime,w));
+   cctx.fillStyle=fill;cctx.fillRect(x1,top,x2-x1,bottom-top);
+   cctx.strokeStyle=phase.partial?'#94a3b8':ink;cctx.lineWidth=1;cctx.setLineDash(phase.partial?[3,3]:[]);
+   cctx.beginPath();cctx.moveTo(x1,top);cctx.lineTo(x1,bottom);cctx.stroke();cctx.setLineDash([]);
+   if(Number.isFinite(phase.minAngle)){
+    const y=mapY(phase.minAngle,h);cctx.fillStyle=ink;cctx.beginPath();cctx.arc((x1+x2)/2,y,3,0,Math.PI*2);cctx.fill();
+    cctx.font='10px ui-monospace,monospace';cctx.fillText(`${phase.minAngle.toFixed(0)}°`,(x1+x2)/2+5,y-4);
+   }
+  }
+ }
+}
+// 疑似雙腳離地。標的是 lowerMs（嚴謹下界）與文獻分帶，不是判定。
+function drawFlights(w,h){
+ const flights=state.report?.flights;if(!flights?.length)return;
+ const top=CHART_TOP,bottom=h-CHART_BOT;
+ for(const fl of flights){
+  const x1=chartX(fl.startTime,w),x2=Math.max(x1+2,chartX(fl.endTime,w)),band=fl.detection?.band||'below-reported';
+  cctx.fillStyle=BAND_FILL[band]||BAND_FILL['below-reported'];cctx.fillRect(x1,top,x2-x1,bottom-top);
+  cctx.strokeStyle=BAND_INK[band]||BAND_INK['below-reported'];cctx.lineWidth=1.5;
+  cctx.beginPath();cctx.moveTo(x1,bottom);cctx.lineTo(x2,bottom);cctx.stroke();
+  cctx.font='10px ui-monospace,monospace';cctx.fillStyle=BAND_INK[band]||BAND_INK['below-reported'];
+  cctx.fillText(`≥${fl.lowerMs.toFixed(0)}ms`,x1,top+11);
+ }
+}
+function chartLegend(w,h){
+ const y=h-34,items=[['#0f766e','左膝'],['#7c3aed','右膝'],['#0f766e33','支撐期（TR54 判準範圍）'],['#e2e8f0','未配對·留白'],['#b4530955','疑似騰空']];
+ let x=36;cctx.font='11px system-ui';
+ for(const [color,label] of items){
+  cctx.fillStyle=color;cctx.fillRect(x,y-8,10,10);
+  cctx.fillStyle='#475569';cctx.fillText(label,x+14,y);
+  x+=18+cctx.measureText(label).width;
+ }
+ cctx.fillStyle='#94a3b8';cctx.font='11px system-ui';
+ cctx.fillText('點圖上任一處可跳到該時間；只有支撐期的最小角對應 TR54，擺動期彎膝屬正常動作。',36,h-14);
+}
+function drawTimeAxis(w,h){
+ const d=video.duration||0;if(!d)return;
+ const step=d<=4?.5:d<=12?1:d<=40?5:10,bottom=h-CHART_BOT;
+ cctx.font='10px ui-monospace,monospace';cctx.textAlign='center';
+ for(let t=0;t<=d+1e-9;t+=step){
+  const x=chartX(t,w);cctx.strokeStyle='#e2e8f0';cctx.beginPath();cctx.moveTo(x,bottom);cctx.lineTo(x,bottom+4);cctx.stroke();
+  cctx.fillStyle='#94a3b8';cctx.fillText(`${t.toFixed(step<1?1:0)}s`,x,bottom+15);
+ }
+ cctx.textAlign='left';
+}
+function drawChart(){
+ const dpr=devicePixelRatio||1,w=chart.clientWidth||600,h=CHART_H;
+ chart.width=Math.round(w*dpr);chart.height=Math.round(h*dpr);cctx.setTransform(dpr,0,0,dpr,0,0);
+ cctx.clearRect(0,0,w,h);cctx.fillStyle='#fbfdff';cctx.fillRect(0,0,w,h);
+ const bottom=h-CHART_BOT;
+ drawGaps(w,h);drawSupportPhases(w,h);drawFlights(w,h);
+ cctx.lineWidth=1;cctx.font='11px ui-monospace,monospace';
+ for(const a of [100,120,140,160,180]){
+  const y=mapY(a,h);cctx.strokeStyle=a===180?'#cbd5e1':'#eef2f6';
+  cctx.beginPath();cctx.moveTo(36,y);cctx.lineTo(w-8,y);cctx.stroke();
+  cctx.fillStyle='#94a3b8';cctx.fillText(String(a),6,y+4);
+ }
+ cctx.fillStyle='#94a3b8';cctx.font='10px system-ui';cctx.fillText('180°＝完全伸直',w-92,mapY(180,h)-5);
+ drawTimeAxis(w,h);chartLegend(w,h);
+ if(state.frames.length>=2){
+  drawBand('leftKnee','#0f766e33',w,h);drawBand('rightKnee','#7c3aed22',w,h);
+  drawLine('leftKnee','#0f766e',w,h);drawLine('rightKnee','#7c3aed',w,h);
+ }
+ const x=chartX(video.currentTime,w);
+ cctx.strokeStyle='#ef4444';cctx.lineWidth=1.5;cctx.beginPath();cctx.moveTo(x,CHART_TOP);cctx.lineTo(x,bottom);cctx.stroke();
+ cctx.fillStyle='#ef4444';cctx.beginPath();cctx.moveTo(x-4,CHART_TOP);cctx.lineTo(x+4,CHART_TOP);cctx.lineTo(x,CHART_TOP+6);cctx.fill();
+}
+// 圖上有資料卻不能跳過去看，等於逼人用眼睛估時間。點或拖曳都直接帶動影片。
+function seekFromChart(event){
+ if(state.analyzing)return;
+ const rect=chart.getBoundingClientRect(),t=chartTime(event.clientX-rect.left,rect.width);
+ if(Number.isFinite(t))video.currentTime=t;
+}
+chart.style.cursor='pointer';
+chart.addEventListener('pointerdown',e=>{chart.setPointerCapture(e.pointerId);seekFromChart(e);});
+chart.addEventListener('pointermove',e=>{if(chart.hasPointerCapture?.(e.pointerId))seekFromChart(e);});
+chart.addEventListener('pointerup',e=>{try{chart.releasePointerCapture(e.pointerId);}catch{}});
 function drawBand(key,color,w,h){const pts=state.frames.map(f=>({t:f.t,m:f.metrics?.[key]})).filter(x=>x.m?.low!=null);if(pts.length<2)return;cctx.fillStyle=color;cctx.beginPath();pts.forEach((p,i)=>{const x=36+p.t/(video.duration||1)*(w-44),y=mapY(p.m.high,h);i?cctx.lineTo(x,y):cctx.moveTo(x,y);});[...pts].reverse().forEach(p=>cctx.lineTo(36+p.t/(video.duration||1)*(w-44),mapY(p.m.low,h)));cctx.closePath();cctx.fill();}
 function buildReport(){
  if(!state.frames.length){state.report=null;return;}
@@ -222,4 +327,4 @@ function formatTime(s){if(!Number.isFinite(s))return '00:00.000';const m=Math.fl
 function fmtAngle(v,b){if(v==null)return '—';return `${v.toFixed(1)}°${b&&b.low!=null?` [${b.low.toFixed(1)}–${b.high.toFixed(1)}]`:''}`;}
 function num(v){return Number.isFinite(v)?v.toFixed(1):'—';}
 function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-updateControls();document.documentElement.dataset.appReady='true';ensureAi().catch(()=>{});
+updateControls();drawChart();addEventListener('resize',()=>drawChart());document.documentElement.dataset.appReady='true';ensureAi().catch(()=>{});

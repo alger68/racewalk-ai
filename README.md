@@ -73,6 +73,20 @@ Report schema is now 5.
 Off-sagittal camera placement biases measured knee angles low. The magnitude of that
 bias is not calibrated.
 
+## Reading the angle chart
+
+A knee-angle line on its own does not say what to look at. TR54 constrains the knee
+only between initial contact and the vertical upright position, so the chart shades
+those support phases and marks each one's minimum; a minimum taken anywhere else is
+not a quantity the rule speaks about. Frames with no reliable match are drawn as
+hatched blanks rather than a gap in the line, because a break in a line looks the same
+as a straight leg. Suspected flight intervals are marked with their `lowerMs` and
+coloured by detection band. Clicking or dragging anywhere on the chart seeks the video
+to that moment.
+
+None of the shading is a verdict. The support-phase minimum is the number TR54 talks
+about; whether it constitutes a bent knee is a judgment this tool does not make.
+
 ## Documentation
 
 `docs/PLAN.md` is the current plan: what the tool is now, what is blocked on real
