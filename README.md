@@ -87,6 +87,19 @@ to that moment.
 None of the shading is a verdict. The support-phase minimum is the number TR54 talks
 about; whether it constitutes a bent knee is a judgment this tool does not make.
 
+## Self-diagnosis
+
+`diagnoseCapture` in `site/core.js` reads a finished report's own summary and says
+whether the result is worth reading, because a coach is handed numbers and needs to
+know what to change. Each finding carries a cause and an action, and the rules are
+ordered blocker / warn / info. The thresholds are plausibility checks on the capture,
+not TR54 criteria: a support-phase minimum well below a straight leg is reported as
+likely off-sagittal projection, never as a bent-knee finding, and no flagged flight is
+reported as absence of proof rather than absence of flight. None of the thresholds is
+calibrated against real footage. `node tests/diagnose.test.mjs` covers the wording as
+well as the branching, including that an early loss of tracking is only attributed to a
+bad seed skeleton when continuity is also low.
+
 ## Documentation
 
 `docs/PLAN.md` is the current plan: what the tool is now, what is blocked on real

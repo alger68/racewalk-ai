@@ -22,7 +22,7 @@
 <div class="timeline"><input id="timeSlider" type="range" min="0" max="0" value="0" step="0.001"><span id="timeText">00:00.000</span></div>
 <div class="actions compact"><button id="playPause">播放 / 暫停</button><button id="prevFrame">◀ 1格</button><button id="nextFrame">1格 ▶</button><button id="manualToggle">人工修點：關</button><select id="manualJoint"><option value="25">左膝</option><option value="27">左踝</option><option value="23">左髖</option><option value="26">右膝</option><option value="28">右踝</option><option value="24">右髖</option></select></div>
 <div class="ground"><label>地面線 <input id="groundSlider" type="range" min="0.45" max="0.98" value="0.9" step="0.001"></label><span id="groundText">自動/待分析</span></div></article></div>
-<div class="grid two lower"><article class="card"><div class="viewerHead"><h2>03 角度曲線＋點位誤差帶</h2><div id="angleNow" class="metricInline">L — / R —</div></div><canvas id="chart" height="300"></canvas></article><article class="card"><div class="viewerHead"><h2>04 快速判讀</h2><button id="monkeyBtn">核心隨機測試 1000 次</button></div><div id="quickStats" class="stats"></div><div id="events" class="events"></div><pre id="monkeyResult" class="testResult"></pre></article></div></section>
+<div class="grid two lower"><article class="card"><div class="viewerHead"><h2>03 角度曲線＋點位誤差帶</h2><div id="angleNow" class="metricInline">L — / R —</div></div><canvas id="chart" height="300"></canvas></article><article class="card"><div class="viewerHead"><h2>04 快速判讀</h2><button id="monkeyBtn">核心隨機測試 1000 次</button></div><div id="quickStats" class="stats"></div><div id="events" class="events"></div><div id="diagnosis" class="diagnosis"></div><pre id="monkeyResult" class="testResult"></pre></article></div></section>
 <section id="report" class="panel"><article class="card"><div class="viewerHead"><h2>本次報告</h2><div class="actions compact"><button id="exportJson">JSON</button><button id="exportCsv">CSV</button><button id="exportHtml">HTML/列印</button></div></div><div id="reportBody" class="reportBody"><p>完成分析後會產生本次報告。</p></div></article></section>
 <section id="records" class="panel"><article class="card"><div class="viewerHead"><h2>訓練紀錄</h2><button id="clearRecords">清除本機紀錄</button></div><p class="muted">只保存分析摘要與設定，不保存影片內容。</p><div id="recordList"></div></article></section>
 <section id="guide" class="panel">
@@ -68,6 +68,15 @@
 <p><strong>拍完後</strong></p>
 <ul><li>原始檔直接備份，不要用會重新編碼的方式傳輸（通訊軟體通常會壓縮並降幀）</li><li>記錄選手、日期、配速、場地條件</li></ul>
 <p class="muted"><strong>為什麼要鎖定快門：</strong>自動曝光在雲層飄過時會改變快門速度。快門一變慢，動態模糊變大，足部關鍵點精度跟著變——而系統無法從影片本身察覺這件事，只會默默把誤差變大的結果照常輸出。</p>
+</article>
+
+<article class="card prose"><h2>延伸資料</h2>
+<ul>
+<li><a href="./plan.html">專案規劃書</a> — 這套工具在量什麼、哪些數字還沒校準、下一步要做什麼。</li>
+<li><a href="https://github.com/alger68/racewalk-ai" target="_blank" rel="noopener">原始碼與完整文件（GitHub）</a> — 含 TR54 條文對照 <code>docs/RULES.md</code> 與拍攝 SOP <code>docs/CAPTURE_GUIDE.md</code>。</li>
+<li><a href="https://worldathletics.org/about-iaaf/documents/book-of-rules" target="_blank" rel="noopener">World Athletics Book of Rules</a> — 競走條文 TR54 的官方出處，請以官方最新版本為準。</li>
+</ul>
+<p class="muted">本工具為輔助分析，不輸出正式判決。正式比賽的判定權屬於人類裁判。</p>
 </article>
 
 <article class="card prose"><h2>指定選手的操作</h2>

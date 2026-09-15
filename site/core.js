@@ -419,3 +419,75 @@ export function runMonkeyCore(iterations = 1000) {
   }
   return { passed, iterations };
 }
+
+// ---- 量測可信度自診 -----------------------------------------------------
+// 這裡的門檻**不是 TR54 判準**，是「這段影片能不能拿來判讀」的檢查。
+// 每一條對應 docs/CAPTURE_GUIDE.md 裡一個具體的拍攝原因，
+// 因為使用者拿到的是數字，需要的是「所以我該改什麼」。
+// 全部只讀報告裡既有的統計量，不碰原始影像。
+
+export const MIN_SCREENING_FPS = 120;        // 40ms 騰空在 60fps 只有 2–3 個取樣點
+export const LOW_CONTINUITY = .70;
+export const VERY_LOW_CONTINUITY = .40;
+// 合格競走選手支撐期的膝角接近伸直。量到明顯小於此值時，
+// 先懷疑投影誤差（機位非正側面），而不是宣稱選手彎膝。
+export const IMPLAUSIBLE_SUPPORT_KNEE = 160;
+const LEVEL_ORDER = {blocker: 0, warn: 1, info: 2};
+
+export function diagnoseCapture(report) {
+  const s = report?.summary;
+  if (!s) return [];
+  const set = report.settings || {}, out = [];
+  const add = (level, title, cause, action) => out.push({level, title, cause, action});
+
+  const sampleFps = Number(set.sampleFps);
+  if (Number.isFinite(sampleFps) && sampleFps < MIN_SCREENING_FPS)
+    add('blocker', `分析取樣 ${sampleFps} fps，不足以篩查騰空`,
+        `40 ms 的騰空在 ${sampleFps} fps 下只有 ${Math.max(1, Math.round(40 / (1000 / sampleFps)))} 個取樣點，短騰空會直接漏掉。`,
+        '提高分析取樣 fps；若原始影片本身低於 120 fps，需重拍。膝角仍可參考。');
+
+  const c = Number(s.continuity);
+  if (Number.isFinite(c) && c < VERY_LOW_CONTINUITY)
+    add('blocker', `追蹤連續率 ${(c * 100).toFixed(1)}%`,
+        '多數影格沒有可靠配對，角度是空的；圖上的斜線留白就是這些影格。',
+        '選手在畫面裡太小、背景雜亂或同色、曝光不足。靠近或拉長焦距，讓選手佔畫面高度一半以上。');
+  else if (Number.isFinite(c) && c < LOW_CONTINUITY)
+    add('warn', `追蹤連續率 ${(c * 100).toFixed(1)}%`,
+        '可用影格偏少，趨勢容易被少數幾格帶偏。',
+        '同上：放大選手在畫面中的比例，並確認背景與服裝有對比。');
+
+  const knees = [['左', s.minLeftKneeSupport], ['右', s.minRightKneeSupport]]
+    .filter(([, v]) => Number.isFinite(v) && v < IMPLAUSIBLE_SUPPORT_KNEE);
+  if (knees.length)
+    add('warn', `支撐期最小角偏小（${knees.map(([k, v]) => `${k} ${v.toFixed(1)}°`).join('、')}）`,
+        '合格競走選手支撐期的膝角接近伸直。量到這個值，最可能是機位不是正側面——離面角度會讓量到的膝角系統性偏小。',
+        '把光軸調到垂直於行進方向。在確認機位之前，不要拿這個數字判讀選手。');
+
+  if (s.supportPhases === 0)
+    add('blocker', '沒有偵測到任何支撐期',
+        'TR54 的彎膝規則只看觸地到通過垂直位置這一段。沒有支撐期就沒有可判讀的膝角。',
+        '確認選手雙腳完整入鏡且未出框，並提高追蹤連續率。');
+  else if (s.partialSupportPhases > 0)
+    add('info', `${s.partialSupportPhases} 段支撐期未涵蓋垂直位置`,
+        '這些段落的髖沒有通過踝的正上方（多半是選手提前出框），取值範圍比規則規定的大。',
+        '讓選手在畫面中多停留一個完整步態週期再出框。');
+
+  if (s.flightIntervals === 0)
+    add('info', '未標記疑似雙腳離地',
+        '這是「沒有證明」，不是「沒有騰空」。取樣幀率與連續率不足時，系統以漏報的形式失去靈敏度。',
+        '要對騰空下任何結論，需要足夠的幀率與連續率。');
+
+  const missing = Number(s.frames) - Number(s.trackedFrames);
+  const stop = report.trackingStop;
+  if (stop && Number(stop.time) < .5 && Number.isFinite(c) && c < LOW_CONTINUITY)
+    add('warn', `第 ${stop.time.toFixed(2)} 秒就失去配對`,
+        '這麼早失聯，通常代表使用者確認的那一格骨架本身就不準；種子不準，後面全部跟著歪。',
+        '先按「辨識目前畫面人物」，確認縮圖上的骨架貼得住，再開始分析。');
+
+  if (!out.length && missing === 0)
+    add('info', '沒有偵測到明顯的拍攝問題',
+        '這只表示上列檢查都通過，不是量測準確度的保證——本工具尚未以實拍校準。',
+        '仍請回看原片核對疊圖是否合理。');
+
+  return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+}
