@@ -2,11 +2,11 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f172a">
-<title>RaceWalk Lab 3.0.2｜宥蓁競走動作分析</title>
-<link rel="stylesheet" href="./styles.css?v=3.0.2"><link rel="stylesheet" href="./runtime-fix.css?v=3.0.2">
+<title>RaceWalk Lab 3.0.3｜宥蓁競走動作分析</title>
+<link rel="stylesheet" href="./styles.css?v=3.0.3"><link rel="stylesheet" href="./runtime-fix.css?v=3.0.3">
 </head>
 <body>
-<header class="topbar"><div><div class="eyebrow">RACEWALK LAB 3.0.2 · CHATGPT REBUILD</div><h1>宥蓁競走動作分析</h1></div><div class="badges"><span id="engineBadge">正在啟動程式</span><span>影片只在本機處理</span></div></header>
+<header class="topbar"><div><div class="eyebrow">RACEWALK LAB 3.0.3 · CHATGPT REBUILD</div><h1>宥蓁競走動作分析</h1></div><div class="badges"><span id="engineBadge">正在啟動程式</span><span>影片只在本機處理</span></div></header>
 <nav class="tabs" aria-label="主選單"><button class="tab active" data-tab="analyze">分析工作台</button><button class="tab" data-tab="report">本次報告</button><button class="tab" data-tab="records">訓練紀錄</button><button class="tab" data-tab="guide">拍攝指南</button></nav>
 <main>
 <section id="analyze" class="panel active"><div class="grid two">
@@ -20,7 +20,7 @@
 <div class="dropzone"><input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm"><strong>匯入競走影片</strong><small>MP4 / MOV / WebM；影片匯入不必等待 AI，原始影片不會提交到 GitHub。</small></div>
 <div class="actions"><button id="initAi" class="primary">載入 AI</button><button id="analyzeBtn" class="primary" disabled>開始 AI 分析</button><button id="stopBtn" disabled>停止</button></div>
 <div class="progress"><div id="progressBar"></div></div><p id="mediaStatus" class="status" role="status">尚未匯入影片。</p><p id="status" class="status" role="status">正在啟動…</p></article>
-<article class="card viewerCard"><div class="viewerHead"><div><h2>02 Judge View</h2><small>選影片 → 點選目標選手 → 開始 AI 分析；從點選的時間開始，最多偵測 6 人，不保證每人均可辨識。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
+<article class="card viewerCard"><div class="viewerHead"><div><h2>02 Judge View</h2><small>匯入影片 → 按開始 AI 分析 → 多人畫面選編號。也可先直接點選目標；最多偵測 6 人，不保證全部辨識。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
 <div id="stage" class="stage"><video id="video" playsinline muted preload="auto" controls></video><canvas id="overlay"></canvas><div id="clickHint">點一下要追蹤的選手</div></div>
 <div class="timeline"><input id="timeSlider" type="range" min="0" max="0" value="0" step="0.001"><span id="timeText">00:00.000</span></div>
 <div class="actions compact"><button id="playPause">播放 / 暫停</button><button id="prevFrame">◀ 1格</button><button id="nextFrame">1格 ▶</button><button id="manualToggle">人工修點：關</button><select id="manualJoint"><option value="25">左膝</option><option value="27">左踝</option><option value="23">左髖</option><option value="26">右膝</option><option value="28">右踝</option><option value="24">右髖</option></select></div>
@@ -28,8 +28,8 @@
 <div class="grid two lower"><article class="card"><div class="viewerHead"><h2>03 角度曲線＋2 px 誤差帶</h2><div id="angleNow" class="metricInline">L — / R —</div></div><canvas id="chart" height="260"></canvas></article><article class="card"><div class="viewerHead"><h2>04 快速判讀</h2><button id="monkeyBtn">核心隨機測試 1000 次</button></div><div id="quickStats" class="stats"></div><div id="events" class="events"></div><pre id="monkeyResult" class="testResult"></pre></article></div></section>
 <section id="report" class="panel"><article class="card"><div class="viewerHead"><h2>本次報告</h2><div class="actions compact"><button id="exportJson">JSON</button><button id="exportCsv">CSV</button><button id="exportHtml">HTML/列印</button></div></div><div id="reportBody" class="reportBody"><p>完成分析後會產生本次報告。</p></div></article></section>
 <section id="records" class="panel"><article class="card"><div class="viewerHead"><h2>訓練紀錄</h2><button id="clearRecords">清除本機紀錄</button></div><p class="muted">只保存分析摘要與設定，不保存影片內容。</p><div id="recordList"></div></article></section>
-<section id="guide" class="panel"><article class="card prose"><h2>拍攝指南</h2><ul><li>優先側面拍攝，鏡頭高度接近髖部，保留全身與腳掌。</li><li>請核對拍攝幀率及分析取樣幀率，不以播放器速度代替拍攝時間。</li><li>多人畫面先點選目標；遮擋與換人仍需人工複查。</li><li>建議每段 10–15 秒。AI 在瀏覽器執行；首次開啟要下載模型。</li><li>AI 結果只做技術篩查，不輸出正式裁判判決。</li></ul></article></section>
-</main><footer>RaceWalk Lab 3.0.2 · ChatGPT rebuild · 模型、影片與瀏覽器推論分開驗證</footer>
+<section id="guide" class="panel"><article class="card prose"><h2>拍攝指南</h2><ul><li>優先側面拍攝，鏡頭高度接近髖部，保留全身與腳掌。</li><li>請核對拍攝幀率及分析取樣幀率，不以播放器速度代替拍攝時間。</li><li>多人畫面請核對人物縮圖後選取；遮擋與換人仍需人工複查。</li><li>預設分析最多 15 秒，可調整 1–60 秒，不改動原始影片。AI 在瀏覽器執行。</li><li>AI 結果只做技術篩查，不輸出正式裁判判決。</li></ul></article></section>
+</main><footer>RaceWalk Lab 3.0.3 · ChatGPT rebuild · 模型就緒不代表影片已完成分析</footer>
 <noscript>請啟用 JavaScript 才能使用影片分析。</noscript>
-<script defer src="./autostart.js?v=3.0.2"></script>
+<script defer src="./autostart.js?v=3.0.3"></script>
 </body></html>

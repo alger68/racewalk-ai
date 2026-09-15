@@ -1,7 +1,7 @@
 name: Test real AI and deploy RaceWalk Lab
 on:
   push:
-    branches: [main, fix/ai-bootstrap-3.0.2]
+    branches: [main, fix/analysis-entry-3.0.3]
   workflow_dispatch:
 permissions:
   contents: read
@@ -25,18 +25,16 @@ jobs:
           node tests/core.test.mjs
           for file in site/*.js; do node --check "$file"; done
       - name: Build pinned SDK, WASM and model into site
-        run: python scripts/build_site.py
+        run: |
+          python scripts/build_site.py
+          python -c "import json,pathlib; p=pathlib.Path('site/asset-manifest.json'); x=json.loads(p.read_text()); x['app']='3.0.3'; p.write_text(json.dumps(x,indent=2)+'\n')"
       - name: Install real-browser test dependencies
         run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium webkit
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Chromium and WebKit real inference, media and failure recovery
+      - name: Real inference, no-selection entry, multi-person choice and recovery
         run: python tests/browser_smoke.py
-      - name: Diagnose graphics and decoded pixels on failure
-        if: failure()
-        timeout-minutes: 4
-        run: python tests/diagnose_webkit.py
       - name: Save browser evidence
         if: always()
         uses: actions/upload-artifact@v4
