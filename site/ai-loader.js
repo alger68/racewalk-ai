@@ -17,13 +17,22 @@ async function getModel(onStatus){
   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}return bytes;
  }catch(error){if(error.name==='AbortError')throw new Error('模型下載逾時，請確認網路後重試');throw error;}finally{clearTimeout(timer);}
 }
+function bounds(pose){
+ const points=[11,12,23,24,25,26,27,28].map(i=>pose[i]).filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&(p.visibility??1)>=.35);
+ if(points.length<3)return null;
+ const x1=Math.min(...points.map(p=>p.x)),y1=Math.min(...points.map(p=>p.y)),x2=Math.max(...points.map(p=>p.x)),y2=Math.max(...points.map(p=>p.y));
+ return {x1,y1,x2,y2,cx:(x1+x2)/2,cy:(y1+y2)/2,area:Math.max(0,(x2-x1)*(y2-y1)),score:points.reduce((s,p)=>s+(p.visibility??1),0)/points.length};
+}
+function duplicate(a,b){
+ const intersection=Math.max(0,Math.min(a.x2,b.x2)-Math.max(a.x1,b.x1))*Math.max(0,Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1));
+ return intersection/Math.max(1e-9,a.area+b.area-intersection)>.55&&Math.hypot(a.cx-b.cx,a.cy-b.cy)<.08;
+}
 export async function createPoseEngine({onStatus=()=>{}}={}){
  if(typeof WebAssembly==='undefined')throw new Error('此瀏覽器不支援 WebAssembly');
- // The WebGL canvas belongs only to MediaPipe, never to our 2D overlay.
- // An explicit HTMLCanvasElement avoids partial OffscreenCanvas support.
+ // MediaPipe owns a dedicated WebGL canvas; never reuse the drawing overlay.
  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;
  const gl=canvas.getContext('webgl2');
- if(!gl)throw new Error('無法建立 WebGL2 圖形環境；請使用支援 WebGL2 的瀏覽器並確認硬體加速可用');
+ if(!gl)throw new Error('無法建立 WebGL2 圖形環境；請確認瀏覽器的硬體加速可用');
  let engine=null;
  const frameCanvas=document.createElement('canvas');
  const frameContext=frameCanvas.getContext('2d',{willReadFrequently:true});
@@ -33,41 +42,51 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
   const {FilesetResolver,PoseLandmarker}=await timeout(import(sdkUrl.href),20000,'AI 引擎載入');
   const modelAssetBuffer=await getModel(onStatus);onStatus('初始化 AI（首次載入請稍候）…');
   const vision=await timeout(FilesetResolver.forVisionTasks(new URL('wasm/',SDK_ROOT).href.replace(/\/$/,'')),20000,'WASM 載入');
-  // This app analyzes decoded frames after seeks, not a live camera stream.
-  // Run the detector independently on every sampled frame. The application's
-  // chooseTarget() owns identity continuity; do not reuse an opaque SDK video
-  // tracking state across warm-up, seeks, repeated analyses or new videos.
+  // Seek-based video analysis uses independent frames. Application-level matching
+  // owns identity continuity; SDK temporal video tracking is not claimed.
   engine=await timeout(PoseLandmarker.createFromOptions(vision,{canvas,baseOptions:{modelAssetBuffer,delegate:'CPU'},runningMode:'IMAGE',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35,outputSegmentationMasks:false}),60000,'AI 模型初始化');
   onStatus('驗證 AI 圖形推論…');
   frameCanvas.width=256;frameCanvas.height=256;
   frameContext.fillStyle='#808080';frameContext.fillRect(0,0,256,256);
   engine.detect(frameContext.getImageData(0,0,256,256));
   let closed=false;
+  function inferFull(input){return engine.detect(input);}
   return {
    inferenceMode:'IMAGE-per-frame',
-   // Preserve the app adapter API. Timestamp remains application metadata,
-   // not a claim that the SDK video tracker or its temporal smoothing is used.
    detectForVideo(source,timestamp){
     if(closed)throw new Error('AI 引擎已關閉，請重新載入');
     if(!Number.isFinite(timestamp)||timestamp<0)throw new Error('無效的影格時間');
     let input=source;
-    if(source instanceof HTMLVideoElement){
+    const isVideo=source instanceof HTMLVideoElement;
+    if(isVideo){
      const width=source.videoWidth,height=source.videoHeight;
      if(source.readyState<2||source.seeking||!width||!height)throw new Error('影片影格尚未解碼，無法送入 AI');
      if(frameCanvas.width!==width)frameCanvas.width=width;
      if(frameCanvas.height!==height)frameCanvas.height=height;
-     // Feed explicit decoded pixels instead of browser-owned video textures.
-     // Native dimensions and the original normalized coordinates are retained.
      frameContext.drawImage(source,0,0,width,height);
      input=frameContext.getImageData(0,0,width,height);
     }
-    return engine.detect(input);
+    const full=inferFull(input);
+    // The detector downsamples the whole image. Small people can disappear.
+    // Only an empty full-frame result invokes the additional, slower passes.
+    // Every crop result is reprojected into ORIGINAL normalized coordinates.
+    if(!isVideo||full.landmarks?.length||input.width<720||input.height<480)return full;
+    const width=input.width,height=input.height,candidates=[];
+    for(const [fx,fy] of [[0,0],[.38,0],[0,.38],[.38,.38]]){
+     const x=Math.floor(fx*width),y=Math.floor(fy*height);
+     const w=Math.min(width-x,Math.ceil(width*.62)),h=Math.min(height-y,Math.ceil(height*.62));
+     const result=engine.detect(frameContext.getImageData(x,y,w,h));
+     for(const pose of result.landmarks||[]){
+      const mapped=pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)}));
+      const box=bounds(mapped);if(box&&box.area>0)candidates.push({pose:mapped,box});
+     }
+    }
+    candidates.sort((a,b)=>b.box.score-a.box.score);
+    const selected=[];
+    for(const candidate of candidates){if(!selected.some(other=>duplicate(candidate.box,other.box)))selected.push(candidate);if(selected.length===6)break;}
+    return {landmarks:selected.map(c=>c.pose),worldLandmarks:[],segmentationMasks:[],scanMode:'tiled-empty-fallback'};
    },
    close(){if(closed)return;closed=true;try{engine.close();}finally{gl.getExtension('WEBGL_lose_context')?.loseContext();frameCanvas.width=0;frameCanvas.height=0;}}
   };
- }catch(error){
-  try{engine?.close();}catch{}
-  gl.getExtension('WEBGL_lose_context')?.loseContext();
-  throw error;
- }
+ }catch(error){try{engine?.close();}catch{}gl.getExtension('WEBGL_lose_context')?.loseContext();throw error;}
 }
