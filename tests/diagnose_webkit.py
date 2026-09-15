@@ -1,4 +1,4 @@
-"""Diagnose real WebKit/Chromium inference with a public fixture; no mocked model."""
+"""Diagnose the actual app with a public video fixture, without mocking inference."""
 from pathlib import Path
 from functools import partial
 import http.server,threading,json,traceback
@@ -7,60 +7,35 @@ ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'test-results';OUT.mkdir(exist_ok=True)
 class Server(http.server.SimpleHTTPRequestHandler):
  def log_message(self,*args):pass
- def translate_path(self,path):
-  if path.split('?')[0].startswith('/__fixtures__/'):
-   return str(OUT/'fixture'/Path(path.split('?')[0]).name)
-  return super().translate_path(path)
- def do_GET(self):
-  if self.path.startswith('/__probe__'):
-   self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(b'<!doctype html><body>Inference diagnostics</body>');return
-  super().do_GET()
 server=http.server.ThreadingHTTPServer(('127.0.0.1',0),partial(Server,directory=str(ROOT/'site')))
 threading.Thread(target=server.serve_forever,daemon=True).start()
-URL=f'http://127.0.0.1:{server.server_port}'
+URL=f'http://127.0.0.1:{server.server_port}/'
 results=[]
-js=r'''async ({delegate,nosimd})=>{
- const out={delegate,nosimd};let engine;
- try{
-  const {FilesetResolver,PoseLandmarker}=await import('/vendor/mediapipe/vision_bundle.mjs');
-  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;
-  const gl=canvas.getContext('webgl2');out.webgl2=!!gl;
-  if(gl){const ext=gl.getExtension('WEBGL_debug_renderer_info');out.renderer=ext?gl.getParameter(ext.UNMASKED_RENDERER_WEBGL):gl.getParameter(gl.RENDERER);}
-  out.offscreen=typeof OffscreenCanvas!=='undefined';
-  if(out.offscreen)out.offscreenWebgl2=!!new OffscreenCanvas(16,16).getContext('webgl2');
-  const vision=nosimd?{wasmLoaderPath:'/vendor/mediapipe/wasm/vision_wasm_nosimd_internal.js',wasmBinaryPath:'/vendor/mediapipe/wasm/vision_wasm_nosimd_internal.wasm'}:await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
-  const bytes=new Uint8Array(await (await fetch('/models/pose_landmarker_full.task')).arrayBuffer());
-  engine=await PoseLandmarker.createFromOptions(vision,{canvas,baseOptions:{modelAssetBuffer:bytes,delegate},runningMode:'IMAGE',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35});
-  const image=new Image();image.src='/__fixtures__/pose.jpg';await image.decode();
-  const copy=document.createElement('canvas');const ctx=copy.getContext('2d',{willReadFrequently:true});
-  function pixels(source,w,h){copy.width=w;copy.height=h;ctx.drawImage(source,0,0,w,h);return ctx.getImageData(0,0,w,h);}
-  function stats(data){let sum=0,sq=0,n=0;for(let i=0;i<data.data.length;i+=64){const v=data.data[i];sum+=v;sq+=v*v;n++;}return {width:data.width,height:data.height,mean:sum/n,variance:sq/n-(sum/n)**2};}
-  const id=pixels(image,image.naturalWidth,image.naturalHeight);out.imagePixels=stats(id);
-  out.imageElementPoses=engine.detect(image).landmarks.length;
-  out.imageDataPoses=engine.detect(id).landmarks.length;
-  const video=document.createElement('video');video.muted=true;video.playsInline=true;video.preload='auto';document.body.append(video);video.src='/__fixtures__/pose.mp4';
-  await new Promise((resolve,reject)=>{video.onloadeddata=resolve;video.onerror=()=>reject(Error('video decode'));setTimeout(()=>reject(Error('video decode timeout')),10000);video.load();});
-  const vd=pixels(video,video.videoWidth,video.videoHeight);out.videoPixels=stats(vd);
-  out.videoImageDataPoses=engine.detect(vd).landmarks.length;
-  out.videoElementPoses=engine.detect(video).landmarks.length;
-  return out;
- }catch(e){out.error=String(e);out.stack=e.stack;return out;}
- finally{try{engine?.close();}catch{}}
-}'''
+pixels=r'''()=>{const v=document.querySelector('#video'),c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;const x=c.getContext('2d');x.drawImage(v,0,0);const data=x.getImageData(0,0,c.width,c.height);let s=0,ss=0,n=0;for(let i=0;i<data.data.length;i+=64){s+=data.data[i];ss+=data.data[i]**2;n++;}const r=v.getBoundingClientRect();return {width:c.width,height:c.height,mean:s/n,variance:ss/n-(s/n)**2,time:v.currentTime,ready:v.readyState,seeking:v.seeking,paused:v.paused,rect:{top:r.top,bottom:r.bottom},viewport:innerHeight,source:v.currentSrc.slice(0,20),status:document.querySelector('#status').textContent};}'''
 try:
  with sync_playwright() as p:
-  for browser_name in ('chromium','webkit'):
-   opts={'headless':True}
-   if browser_name=='chromium':opts['args']=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']
-   browser=getattr(p,browser_name).launch(**opts)
-   for delegate,nosimd in [('CPU',False),('CPU',True),('GPU',False)]:
-    page=browser.new_page();errors=[]
-    page.on('console',lambda m:errors.append(m.text[:1500]) if m.type=='error' else None)
-    try:
-     page.goto(URL+'/__probe__');r=page.evaluate(js,{'delegate':delegate,'nosimd':nosimd});r['browser']=browser_name;r['errors']=errors
-     results.append(r);print('INFERENCE_DIAG',json.dumps(r),flush=True)
-    except Exception as e:results.append({'browser':browser_name,'delegate':delegate,'nosimd':nosimd,'error':str(e)})
-    finally:page.close();(OUT/'webkit-diagnostics.json').write_text(json.dumps(results,indent=2))
-   browser.close()
+  for width,height in [(390,844),(1440,1000)]:
+   browser=p.webkit.launch(headless=True);page=browser.new_page(viewport={'width':width,'height':height});row={'viewport':[width,height],'errors':[]};results.append(row)
+   page.on('console',lambda m:row['errors'].append(m.text[:1000]) if m.type=='error' else None)
+   try:
+    page.goto(URL);page.wait_for_function("document.documentElement.dataset.appReady==='true'")
+    page.set_input_files('#videoInput',str(OUT/'fixture/pose.mp4'));page.wait_for_function("document.querySelector('#video').readyState>=2")
+    page.wait_for_function("document.querySelector('#engineBadge').textContent.includes('AI 已載入')",timeout=120000)
+    page.fill('#sampleFps','10');box=page.locator('#overlay').bounding_box();page.locator('#overlay').click(position={'x':box['width']/2,'y':box['height']/2})
+    page.click('#analyzeBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
+    row['after_app']=page.evaluate(pixels)
+    page.screenshot(path=str(OUT/f'webkit-app-{width}.png'),full_page=True)
+    page.locator('#video').scroll_into_view_if_needed();page.wait_for_timeout(300)
+    row['after_scroll']=page.evaluate(pixels)
+    row['fresh_engine']=page.evaluate("""async()=>{const m=await import('./ai-loader.js?v=3.0.2');window._probeEngine=await m.createPoseEngine();return _probeEngine.detectForVideo(document.querySelector('#video'),10000).landmarks.length;}""")
+    await_prime="""async()=>{const v=document.querySelector('#video');v.muted=true;v.currentTime=0;await v.play();await new Promise(r=>setTimeout(r,150));v.pause();} """
+    page.evaluate(await_prime);row['after_play']=page.evaluate(pixels)
+    row['after_play_poses']=page.evaluate("()=>_probeEngine.detectForVideo(document.querySelector('#video'),20000).landmarks.length")
+    page.evaluate('()=>_probeEngine.close()')
+    page.click('#analyzeBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
+    row['repeat_app']=page.evaluate(pixels)
+   except Exception as e:row['failure']=str(e);row['traceback']=traceback.format_exc()
+   finally:
+    print('APP_DIAG',json.dumps(row),flush=True);page.close();browser.close();(OUT/'webkit-app-diagnostics.json').write_text(json.dumps(results,indent=2))
 finally:
- (OUT/'webkit-diagnostics.json').write_text(json.dumps(results,indent=2));server.shutdown()
+ (OUT/'webkit-app-diagnostics.json').write_text(json.dumps(results,indent=2));server.shutdown()
