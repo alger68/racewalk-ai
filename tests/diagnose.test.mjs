@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {diagnoseCapture,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE} from '../site/core.js';
+import {diagnoseCapture,kneeChangeRate,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
+        MAX_PLAUSIBLE_KNEE_RATE,MAX_PLAUSIBLE_FLIGHT_MS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
 // 一份「一切正常」的報告，各測試只改自己關心的那一欄。
@@ -79,6 +80,57 @@ check('每一條都給得出原因與做法',()=>{
       assert.ok(f.title&&f.cause&&f.action,`缺欄位：${JSON.stringify(f)}`);
       assert.ok(['blocker','warn','info'].includes(f.level));
     }
+});
+
+// 逐格膝角序列。step 是每格的變化量（度）。
+const kneeFrames=(step,n=60,key='leftKnee')=>Array.from({length:n},(_,i)=>({metrics:{[key]:{value:150+(i%2?step:0)}}}));
+
+check('角速度用中位數，不被少數幾格帶走',()=>{
+  // 平穩序列裡插入一格大跳動：中位數應該不動
+  const f=Array.from({length:40},(_,i)=>({metrics:{leftKnee:{value:150+i*2}}}));
+  f[20].metrics.leftKnee.value=10;
+  const r=kneeChangeRate(f,'leftKnee',30);
+  assert.ok(r<MAX_PLAUSIBLE_KNEE_RATE,`中位數不該被單一離群值推高，得到 ${r}`);
+  assert.equal(kneeChangeRate([],'leftKnee',30),null);
+  assert.equal(kneeChangeRate(kneeFrames(5,4),'leftKnee',30),null,'樣本太少不下結論');
+  assert.equal(kneeChangeRate(kneeFrames(5),'leftKnee',0),null);
+});
+
+check('逐格來回跳動被抓成 blocker，不是被當成動作',()=>{
+  // 150↔180 每格來回：30°/格 × 30fps = 900°/秒，生理上不可能
+  const r=ok({summary:{},settings:{sampleFps:30}});r.frames=kneeFrames(30);
+  const f=diagnoseCapture(r).find(x=>x.title.includes('逐格跳動'));
+  assert.ok(f,'應該要抓到');
+  assert.equal(f.level,'blocker');
+  assert.ok(f.title.includes('900°/秒'),f.title);
+  assert.ok(f.cause.includes('左右腳')&&f.cause.includes('一步只擺盪一次'));
+  assert.ok(f.action.includes('不能拿來判讀'));
+});
+
+check('正常擺幅不誤報，且門檻隨取樣率縮放',()=>{
+  const slow=ok({settings:{sampleFps:30}});slow.frames=kneeFrames(6);   // 6°/格 × 30fps = 180°/秒
+  assert.ok(!diagnoseCapture(slow).some(x=>x.title.includes('逐格跳動')));
+  // 同樣的 6°/格，在 240fps 取樣下就是 1440°/秒——那才是不可能的動作
+  const fast=ok({settings:{sampleFps:240}});fast.frames=kneeFrames(6);
+  assert.ok(diagnoseCapture(fast).some(x=>x.title.includes('逐格跳動')),'門檻是角速度，不是每格度數');
+});
+
+check('騰空長到生理上不可能時，歸因於關鍵點遺失',()=>{
+  const r=ok();r.flights=[{lowerMs:367,startTime:5.767,endTime:6.133}];
+  const f=diagnoseCapture(r).find(x=>x.title.includes('疑似騰空長達'));
+  assert.equal(f.level,'blocker');
+  assert.ok(f.title.includes('367 ms'));
+  assert.ok(f.cause.includes('足部關鍵點')&&f.cause.includes('不是騰空'));
+  const okFlight=ok();okFlight.flights=[{lowerMs:MAX_PLAUSIBLE_FLIGHT_MS,startTime:1,endTime:1.2}];
+  assert.ok(!diagnoseCapture(okFlight).some(x=>x.title.includes('疑似騰空長達')));
+});
+
+check('下界為 0 的觀測被單獨點名，不混進可證明的區間',()=>{
+  const r=ok();r.flights=[{lowerMs:0,startTime:5.4,endTime:5.4},{lowerMs:33,startTime:7,endTime:7.1}];
+  const f=diagnoseCapture(r).find(x=>x.title.includes('無法證明'));
+  assert.ok(f&&f.level==='info');
+  assert.ok(f.title.startsWith('1 段'));
+  assert.ok(f.cause.includes('下界是 0')&&f.cause.includes('不構成證據'));
 });
 
 console.log(JSON.stringify({suite:'diagnose',cases,passed:true,

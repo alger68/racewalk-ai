@@ -222,7 +222,7 @@ function drawGaps(w,h){
 // TR54 彎膝規則只看這一段。擺動期的最小值與規則無關，不該拿來判讀。
 function drawSupportPhases(w,h){
  const knee=state.report?.supportKnee;if(!knee)return;
- const top=CHART_TOP,bottom=h-CHART_BOT;
+ const top=CHART_TOP,bottom=h-CHART_BOT;let lastLabelEnd=-Infinity;
  for(const [side,fill,ink] of [['left','#0f766e14','#0f766e'],['right','#7c3aed14','#7c3aed']]){
   for(const phase of knee[side]||[]){
    if(phase.startTime==null||phase.endTime==null)continue;
@@ -231,8 +231,12 @@ function drawSupportPhases(w,h){
    cctx.strokeStyle=phase.partial?'#94a3b8':ink;cctx.lineWidth=1;cctx.setLineDash(phase.partial?[3,3]:[]);
    cctx.beginPath();cctx.moveTo(x1,top);cctx.lineTo(x1,bottom);cctx.stroke();cctx.setLineDash([]);
    if(Number.isFinite(phase.minAngle)){
-    const y=mapY(phase.minAngle,h);cctx.fillStyle=ink;cctx.beginPath();cctx.arc((x1+x2)/2,y,3,0,Math.PI*2);cctx.fill();
-    cctx.font='10px ui-monospace,monospace';cctx.fillText(`${phase.minAngle.toFixed(0)}°`,(x1+x2)/2+5,y-4);
+    const cx=(x1+x2)/2,y=mapY(phase.minAngle,h);
+    cctx.fillStyle=ink;cctx.beginPath();cctx.arc(cx,y,3,0,Math.PI*2);cctx.fill();
+    // 標籤疊在一起等於沒有標籤：太窄或會壓到前一個就只留點，數值仍在報告裡。
+    cctx.font='10px ui-monospace,monospace';
+    const text=`${phase.minAngle.toFixed(0)}°`,tw=cctx.measureText(text).width;
+    if(x2-x1>=26&&cx+5>lastLabelEnd+6){cctx.fillText(text,cx+5,y-4);lastLabelEnd=cx+5+tw;}
    }
   }
  }
@@ -242,11 +246,17 @@ function drawFlights(w,h){
  const flights=state.report?.flights;if(!flights?.length)return;
  const top=CHART_TOP,bottom=h-CHART_BOT;
  for(const fl of flights){
+  const provable=fl.lowerMs>0;
   const x1=chartX(fl.startTime,w),x2=Math.max(x1+2,chartX(fl.endTime,w)),band=fl.detection?.band||'below-reported';
+  const ink=BAND_INK[band]||BAND_INK['below-reported'];
+  if(!provable){ // 下界 0：證明不了長度，畫成細虛線提示有觀測，但不標數值
+   cctx.strokeStyle='#cbd5e1';cctx.lineWidth=1;cctx.setLineDash([2,3]);
+   cctx.beginPath();cctx.moveTo(x1,top);cctx.lineTo(x1,bottom);cctx.stroke();cctx.setLineDash([]);continue;
+  }
   cctx.fillStyle=BAND_FILL[band]||BAND_FILL['below-reported'];cctx.fillRect(x1,top,x2-x1,bottom-top);
-  cctx.strokeStyle=BAND_INK[band]||BAND_INK['below-reported'];cctx.lineWidth=1.5;
+  cctx.strokeStyle=ink;cctx.lineWidth=1.5;
   cctx.beginPath();cctx.moveTo(x1,bottom);cctx.lineTo(x2,bottom);cctx.stroke();
-  cctx.font='10px ui-monospace,monospace';cctx.fillStyle=BAND_INK[band]||BAND_INK['below-reported'];
+  cctx.font='10px ui-monospace,monospace';cctx.fillStyle=ink;
   cctx.fillText(`≥${fl.lowerMs.toFixed(0)}ms`,x1,top+11);
  }
 }
@@ -311,7 +321,12 @@ function buildReport(){
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}
-function renderQuick(){if(!state.report)return;const s=state.report.summary;$('quickStats').innerHTML=`${stat('指定選手',state.report.targetSelection?.id||'—')}${stat('追蹤連續率',(s.continuity*100).toFixed(1)+'%')}${stat('左膝支撐期最小角',s.minLeftKneeSupport==null?'—':s.minLeftKneeSupport.toFixed(1)+'°')}${stat('右膝支撐期最小角',s.minRightKneeSupport==null?'—':s.minRightKneeSupport.toFixed(1)+'°')}`;$('events').innerHTML=state.report.flights.length?state.report.flights.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · ${e.lowerMs.toFixed(0)}–${e.upperMs.toFixed(0)} ms${e.detection?' · '+e.detection.label:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join(''):'<p class="muted">未標記疑似雙腳離地；不代表已通過正式競走判定。</p>';document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
+function renderQuick(){if(!state.report)return;const s=state.report.summary;$('quickStats').innerHTML=`${stat('指定選手',state.report.targetSelection?.id||'—')}${stat('追蹤連續率',(s.continuity*100).toFixed(1)+'%')}${stat('左膝支撐期最小角',s.minLeftKneeSupport==null?'—':s.minLeftKneeSupport.toFixed(1)+'°')}${stat('右膝支撐期最小角',s.minRightKneeSupport==null?'—':s.minRightKneeSupport.toFixed(1)+'°')}`;$('events').innerHTML=(()=>{
+  const all=state.report.flights||[],provable=all.filter(e=>e.lowerMs>0),weak=all.length-provable.length;
+  const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · 至少 ${e.lowerMs.toFixed(0)} ms${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join('');
+  const note=weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'';
+  return rows?rows+note:`<p class="muted">未標記可證明的雙腳離地；這是「沒有證明」，不是「沒有騰空」。${weak?`（有 ${weak} 段單格觀測不構成證據。）`:''}</p>`;
+})();document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
 function stat(k,v){return `<div class="stat"><span>${k}</span><strong>${v}</strong></div>`;}
 const LEVEL_TEXT={blocker:'結論不可用',warn:'影響判讀',info:'參考'};
 function renderDiagnosis(){

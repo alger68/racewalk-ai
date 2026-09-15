@@ -95,7 +95,12 @@ know what to change. Each finding carries a cause and an action, and the rules a
 ordered blocker / warn / info. The thresholds are plausibility checks on the capture,
 not TR54 criteria: a support-phase minimum well below a straight leg is reported as
 likely off-sagittal projection, never as a bent-knee finding, and no flagged flight is
-reported as absence of proof rather than absence of flight. None of the thresholds is
+reported as absence of proof rather than absence of flight. It also refuses two things the second real clip produced: a knee series whose
+median frame-to-frame rate exceeds any real gait (reported as jitter, most likely
+left/right legs swapping under a side view, not as technique), and a flight interval
+longer than any credible one (reported as feet lost from the frame, not as flight).
+An interval whose rigorous lower bound is zero proves nothing and is listed separately
+from the provable ones rather than beside them. None of the thresholds is
 calibrated against real footage. `node tests/diagnose.test.mjs` covers the wording as
 well as the branching, including that an early loss of tracking is only attributed to a
 bad seed skeleton when continuity is also low.

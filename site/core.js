@@ -432,7 +432,25 @@ export const VERY_LOW_CONTINUITY = .40;
 // 合格競走選手支撐期的膝角接近伸直。量到明顯小於此值時，
 // 先懷疑投影誤差（機位非正側面），而不是宣稱選手彎膝。
 export const IMPLAUSIBLE_SUPPORT_KNEE = 160;
+// 步態中膝角的尖峰角速度約 300–400°/s。逐格變化的**中位數**就超過這個量級時，
+// 那不是動作，是量測跳動——最常見的原因是側面視角下左右腳被交換。
+export const MAX_PLAUSIBLE_KNEE_RATE = 400;
+// 競走的騰空是 20–40 ms 等級；短跑的騰空也只有約 120 ms。
+// 下界超過這個值時，較可能是足部關鍵點遺失而非真的騰空。
+export const MAX_PLAUSIBLE_FLIGHT_MS = 200;
 const LEVEL_ORDER = {blocker: 0, warn: 1, info: 2};
+
+// 逐格角度變化的中位數（°/秒）。用中位數而不是最大值：
+// 真實步態本來就有少數幾格是高角速度，被那幾格帶走就會誤報。
+export function kneeChangeRate(frames, key, fps) {
+  const steps = [];
+  for (let i = 1; i < (frames?.length || 0); i++) {
+    const a = frames[i - 1]?.metrics?.[key]?.value, b = frames[i]?.metrics?.[key]?.value;
+    if (Number.isFinite(a) && Number.isFinite(b)) steps.push(Math.abs(b - a));
+  }
+  if (steps.length < 8 || !Number.isFinite(fps) || fps <= 0) return null;
+  return percentile(steps, 0.5) * fps;
+}
 
 export function diagnoseCapture(report) {
   const s = report?.summary;
@@ -476,6 +494,27 @@ export function diagnoseCapture(report) {
     add('info', '未標記疑似雙腳離地',
         '這是「沒有證明」，不是「沒有騰空」。取樣幀率與連續率不足時，系統以漏報的形式失去靈敏度。',
         '要對騰空下任何結論，需要足夠的幀率與連續率。');
+
+  const fps = Number(set.sampleFps);
+  const rates = [['左', 'leftKnee'], ['右', 'rightKnee']]
+    .map(([side, key]) => [side, kneeChangeRate(report.frames, key, fps)])
+    .filter(([, r]) => Number.isFinite(r) && r > MAX_PLAUSIBLE_KNEE_RATE);
+  if (rates.length)
+    add('blocker', `膝角逐格跳動過大（${rates.map(([k, r]) => `${k} ${Math.round(r)}°/秒`).join('、')}）`,
+        `真實步態的膝角尖峰角速度約 ${MAX_PLAUSIBLE_KNEE_RATE}°/秒，而且一步只擺盪一次。中位數就超過這個量級，代表曲線在逐格跳動——側面視角下左右腳被交換是最常見的原因，關節點不穩也會。`,
+        '這種曲線的最小角不能拿來判讀。提高選手在畫面中的比例與對比，讓兩腳可以被分開。');
+
+  const wild = (report.flights || []).filter(f => Number(f.lowerMs) > MAX_PLAUSIBLE_FLIGHT_MS);
+  if (wild.length)
+    add('blocker', `${wild.length} 段疑似騰空長達 ${Math.round(Math.max(...wild.map(f => f.lowerMs)))} ms`,
+        `競走的騰空是 20–40 ms 等級，短跑也只有約 120 ms。超過 ${MAX_PLAUSIBLE_FLIGHT_MS} ms 不是騰空，是足部關鍵點在那段時間遺失。`,
+        '確認選手雙腳全程入鏡、未被其他人遮擋，且下半身沒有因為曝光或背景而糊掉。');
+
+  const unprovable = (report.flights || []).filter(f => !(Number(f.lowerMs) > 0)).length;
+  if (unprovable)
+    add('info', `${unprovable} 段離地觀測無法證明任何長度`,
+        '只觀察到單格雙腳離地時，取樣界線的下界是 0——這不構成證據，已與可證明的區間分開列示。',
+        '提高分析取樣 fps 才能把這類觀測變成可證明的區間。');
 
   const missing = Number(s.frames) - Number(s.trackedFrames);
   const stop = report.trackingStop;
