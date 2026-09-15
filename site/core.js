@@ -483,6 +483,22 @@ function worstSupportPhaseTime(report) {
   return all.sort((a, b) => a.minAngle - b.minAngle)[0].startTime;
 }
 
+// 哪些發現會讓哪個數字不可判讀。介面用這個把警告掛回數字本身——
+// 上面用大字顯示 126.7°，下面卻寫「不要拿這個數字判讀」，那是自相矛盾的呈現。
+export function affectedMetrics(findings = []) {
+  const out = {};
+  const mark = (key, level) => {
+    if (out[key] == null || LEVEL_ORDER[level] < LEVEL_ORDER[out[key]]) out[key] = level;
+  };
+  for (const f of findings) {
+    if (/膝角|支撐期/.test(f.title)) mark('knee', f.level);
+    // 追蹤不連續會同時毀掉膝角：取不到骨架就沒有角度可言。
+    if (/連續率|失去配對/.test(f.title)) { mark('continuity', f.level); mark('knee', f.level); }
+    if (/騰空|離地|篩查/.test(f.title)) mark('flight', f.level);
+  }
+  return out;
+}
+
 export function diagnoseCapture(report) {
   const s = report?.summary;
   if (!s) return [];

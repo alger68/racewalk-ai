@@ -1,4 +1,4 @@
-import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture } from './core.js?v=3.0.4';
+import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics } from './core.js?v=3.0.4';
 import { LockedTarget, describePose, selectionCandidates, sampleAppearance, contentRect } from './target-lock.js?v=3.0.4';
 import { createPoseEngine } from './ai-loader.js?v=3.0.4';
 const $=id=>document.getElementById(id);
@@ -321,13 +321,31 @@ function buildReport(){
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}
-function renderQuick(){if(!state.report)return;const s=state.report.summary;$('quickStats').innerHTML=`${stat('指定選手',state.report.targetSelection?.id||'—')}${stat('追蹤連續率',(s.continuity*100).toFixed(1)+'%')}${stat('左膝支撐期最小角',s.minLeftKneeSupport==null?'—':s.minLeftKneeSupport.toFixed(1)+'°')}${stat('右膝支撐期最小角',s.minRightKneeSupport==null?'—':s.minRightKneeSupport.toFixed(1)+'°')}`;$('events').innerHTML=(()=>{
+function renderQuick(){if(!state.report)return;const s=state.report.summary;
+ const findings=diagnoseCapture(state.report),hit=affectedMetrics(findings);
+ const blockers=findings.filter(f=>f.level==='blocker').length,warns=findings.filter(f=>f.level==='warn').length;
+ // 結論先講。要往下讀完五條才知道能不能用，等於沒講。
+ $('verdict').className='verdict '+(blockers?'blocker':warns?'warn':'ok');
+ $('verdict').innerHTML=blockers
+  ?`<strong>這份結果還不能用來判讀選手</strong><span>${blockers} 項問題會讓結論失效${warns?`，另有 ${warns} 項影響判讀`:''}。詳見下方。</span>`
+  :warns?`<strong>可以看，但有保留</strong><span>${warns} 項會影響判讀，請先確認下方說明。</span>`
+  :`<strong>未發現拍攝問題</strong><span>這不是量測準確度的保證；本工具尚未以實拍校準。</span>`;
+ $('quickStats').innerHTML=
+  stat('追蹤連續率',(s.continuity*100).toFixed(1)+'%',hit.continuity)+
+  stat('左膝支撐期最小角',s.minLeftKneeSupport==null?'—':s.minLeftKneeSupport.toFixed(1)+'°',hit.knee)+
+  stat('右膝支撐期最小角',s.minRightKneeSupport==null?'—':s.minRightKneeSupport.toFixed(1)+'°',hit.knee)+
+  stat('可證明的騰空區間',String((state.report.flights||[]).filter(f=>f.lowerMs>0).length),hit.flight);
+ $('quickTarget').textContent=`指定選手 ${state.report.targetSelection?.id||'—'} · 取樣 ${state.report.settings?.sampleFps??'—'} fps · ${s.frames} 格`;
+ $('events').innerHTML=(()=>{
   const all=state.report.flights||[],provable=all.filter(e=>e.lowerMs>0),weak=all.length-provable.length;
   const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · 至少 ${e.lowerMs.toFixed(0)} ms${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join('');
   const note=weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'';
   return rows?rows+note:`<p class="muted">未標記可證明的雙腳離地；這是「沒有證明」，不是「沒有騰空」。${weak?`（有 ${weak} 段單格觀測不構成證據。）`:''}</p>`;
 })();document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
-function stat(k,v){return `<div class="stat"><span>${k}</span><strong>${v}</strong></div>`;}
+function stat(k,v,level){
+ // 受質疑的數字不該用同樣的大字呈現。標示它，而不是讓人往下讀才發現不能用。
+ const note=level==='blocker'?'此數字不可判讀':level==='warn'?'判讀請保留':'';
+ return `<div class="stat${level?` doubt ${level}`:''}"><span>${k}</span><strong>${v}</strong>${note?`<em>${note}</em>`:''}</div>`;}
 const LEVEL_TEXT={blocker:'結論不可用',warn:'影響判讀',info:'參考'};
 function renderDiagnosis(){
  const box=$('diagnosis');if(!box)return;

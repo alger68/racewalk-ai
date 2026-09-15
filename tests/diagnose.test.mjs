@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {diagnoseCapture,kneeChangeRate,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
+import {diagnoseCapture,kneeChangeRate,affectedMetrics,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
         MAX_PLAUSIBLE_KNEE_RATE,MAX_PLAUSIBLE_FLIGHT_MS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
@@ -157,6 +157,31 @@ check('沒有影格資料時不會硬編一個時間出來',()=>{
   const f=diagnoseCapture(ok({settings:{sampleFps:30},summary:{continuity:.2}}));
   for(const x of f) assert.ok(x.at===null||Number.isFinite(x.at));
 });
+
+check('警告掛得回受影響的數字',()=>{
+  const m=affectedMetrics([
+    {level:'blocker',title:'分析取樣 30 fps，不足以篩查騰空'},
+    {level:'warn',title:'支撐期最小角偏小（左 126.7°）'}]);
+  assert.equal(m.flight,'blocker');
+  assert.equal(m.knee,'warn');
+  assert.equal(m.continuity,undefined,'沒被點名的數字不該被連坐');
+});
+
+check('取不到骨架就沒有角度，連續率問題同時汙染膝角',()=>{
+  const m=affectedMetrics([{level:'blocker',title:'追蹤連續率 28.3%'}]);
+  assert.equal(m.continuity,'blocker');
+  assert.equal(m.knee,'blocker','沒有骨架就沒有膝角，不能只標連續率');
+});
+
+check('同一數字被多條點名時取最嚴重的',()=>{
+  const m=affectedMetrics([
+    {level:'info',title:'支撐期最小角偏小'},
+    {level:'blocker',title:'膝角逐格跳動過大'},
+    {level:'warn',title:'支撐期最小角偏小'}]);
+  assert.equal(m.knee,'blocker');
+});
+
+check('沒有發現就沒有數字被質疑',()=>assert.deepEqual(affectedMetrics([]),{}));
 
 console.log(JSON.stringify({suite:'diagnose',cases,passed:true,
   scope:'capture-plausibility rules over report summaries; thresholds are not TR54 criteria and are not calibrated against real footage'}));
