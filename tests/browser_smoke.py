@@ -1,11 +1,9 @@
-"""Real inference and analysis-entry regression tests; no private user footage.
-Fixtures repeat one public image, so these tests do not measure gait or identity accuracy.
-"""
+"""Real-model selection + tracking guard regression. Public repeated photo, NOT racewalk identity accuracy."""
 from pathlib import Path
 from functools import partial
 from urllib.parse import urlsplit
-import http.server, threading, subprocess, urllib.request, json, os, traceback
-from playwright.sync_api import sync_playwright, expect
+import http.server,threading,subprocess,urllib.request,json,os,traceback
+from playwright.sync_api import sync_playwright,expect
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'test-results';OUT.mkdir(exist_ok=True)
 FIX=OUT/'fixture';FIX.mkdir(exist_ok=True)
@@ -15,7 +13,6 @@ def ff(args):subprocess.run(['ffmpeg','-y','-loglevel','error',*args],check=True
 ff(['-loop','1','-i',str(FIX/'pose.jpg'),'-vf','scale=1280:-2','-t','0.6','-r','30','-c:v','libx264','-pix_fmt','yuv420p',str(FIX/'pose.mp4')])
 ff(['-i',str(FIX/'pose.mp4'),'-c','copy',str(FIX/'pose.mov')])
 ff(['-f','lavfi','-i','color=gray:s=640x360:r=30','-t','0.6','-c:v','libx264','-pix_fmt','yuv420p',str(FIX/'blank.mp4')])
-# Four tiled copies of a public photo exercise the multi-person UI, not race walking.
 ff(['-loop','1','-i',str(FIX/'pose.jpg'),'-filter_complex','[0:v]scale=640:-2,split=4[a][b][c][d];[a][b]hstack[top];[c][d]hstack[bottom];[top][bottom]vstack[out]','-map','[out]','-t','0.6','-r','30','-c:v','libx264','-pix_fmt','yuv420p',str(FIX/'four.mp4')])
 class Quiet(http.server.SimpleHTTPRequestHandler):
  def log_message(self,*args):pass
@@ -23,7 +20,7 @@ server=http.server.ThreadingHTTPServer(('127.0.0.1',0),partial(Quiet,directory=s
 threading.Thread(target=server.serve_forever,daemon=True).start()
 URL=os.environ.get('TEST_BASE_URL',f'http://127.0.0.1:{server.server_port}/')
 origin=urlsplit(URL).netloc
-results={'version':'3.0.3','sample':SAMPLE,'fixture':'Repeated public pose image in MP4/MOV and four-tile collage; NOT user video or gait accuracy validation','checks':[]}
+results={'version':'3.0.4','sample':SAMPLE,'fixture':'Repeated public pose image, 4-tile collage, injected missing detections. NOT user video; NOT identity or gait accuracy validation.','checks':[]}
 def record(name,**values):
  results['checks'].append({'name':name,**values});print('BROWSER_CHECK',name,json.dumps(values,ensure_ascii=False),flush=True)
 def open_page(browser,viewport):
@@ -35,22 +32,43 @@ def open_page(browser,viewport):
  const snapshot=()=>window.rwTestSnapshot({status:document.querySelector('#status')?.textContent,media:document.querySelector('#mediaStatus')?.textContent,badge:document.querySelector('#engineBadge')?.textContent,phase:document.documentElement.dataset.analysisPhase}).catch(()=>{});
  for(const id of ['status','mediaStatus','engineBadge']){const e=document.getElementById(id);if(e)new MutationObserver(snapshot).observe(e,{childList:true,subtree:true});}snapshot();});""")
  return page,errors,external
+def phase(page):return page.evaluate('document.documentElement.dataset.analysisPhase')
+def wait_phase(page,wanted,timeout=60000):
+ page.wait_for_function('wanted=>wanted.includes(document.documentElement.dataset.analysisPhase)',arg=wanted,timeout=timeout)
 def wait_ai(page):
  page.wait_for_function("/AI 已載入|AI 載入失敗/.test(document.querySelector('#engineBadge').textContent)",timeout=120000)
  assert 'AI 已載入' in page.inner_text('#engineBadge'),page.inner_text('#status')
 def load(page,name):
  page.set_input_files('#videoInput',str(FIX/name));page.wait_for_function("document.querySelector('#video').readyState>=2")
  page.fill('#sampleFps','10')
-def select_target(page):
- box=page.locator('#overlay').bounding_box();assert box
- page.locator('#overlay').click(position={'x':box['width']/2,'y':box['height']/2})
-def wait_finish(page):
- page.wait_for_function("['complete','error','no-result','no-person','select-target'].includes(document.documentElement.dataset.analysisPhase)",timeout=60000)
- assert page.evaluate('document.documentElement.dataset.analysisPhase')=='complete',page.inner_text('#status')
+def scan(page):
+ page.click('#scanPeopleBtn');wait_phase(page,['select-target','no-person','no-selected-person','error']);assert page.locator('.person-choice').count()>0,page.inner_text('#status')
+def choose(page,n=0):
+ choice=page.locator('.person-choice').nth(n)
+ original_index=int(choice.get_attribute('data-person-index'))
+ anchor=(float(choice.get_attribute('data-center-x')),float(choice.get_attribute('data-center-y')))
+ choice.click();assert phase(page)=='confirm-target'
+ page.click('#startHereBtn');assert phase(page)=='confirm-target','Start must not bypass explicit confirmation'
+ page.click('#confirmTargetBtn');assert phase(page)=='target-confirmed'
+ return original_index,anchor
+def run(page):
+ page.click('#startHereBtn');wait_phase(page,['complete','error','target-paused','no-result'])
+ assert phase(page)=='complete',page.inner_text('#status')
 def report(page):
  page.click('[data-tab=report]')
  with page.expect_download() as d:page.click('#exportJson')
  data=json.loads(Path(d.value.path()).read_text());page.click('[data-tab=analyze]');return data
+def verify_target(data,index,anchor):
+ assert data['engine']=='rw-3.0.4-target-lock'
+ assert data['targetSelection']['index']==index
+ assert data['summary']['trackedFrames']>=5,data['summary']
+ assert data['trackingStop'] is None,data['trackingStop']
+ lm=data['frames'][0]['landmarks']
+ center=(sum(lm[i]['x'] for i in [11,12,23,24])/4,sum(lm[i]['y'] for i in [11,12,23,24])/4)
+ assert abs(center[0]-anchor[0])<.025 and abs(center[1]-anchor[1])<.025,(center,anchor)
+ assert all(f['targetId']==data['targetSelection']['id'] for f in data['frames'])
+ assert any((f.get('metrics',{}).get('leftKnee') or {}).get('value') is not None for f in data['frames'])
+ return center
 try:
  with sync_playwright() as p:
   for name in ('chromium','webkit'):
@@ -60,58 +78,74 @@ try:
    viewport={'width':1440,'height':1000} if name=='chromium' else {'width':390,'height':844}
    page,errors,external=open_page(browser,viewport)
    page.goto(URL,wait_until='domcontentloaded');page.wait_for_function("document.documentElement.dataset.appReady==='true'");wait_ai(page)
-   assert page.input_value('#date')
    page.click('#startHereBtn');assert '[NO_VIDEO]' in page.inner_text('#status')
-   record(name+'_missing_video_explained',passed=True)
-   # The old version silently disabled analysis here. No coordinate click is used.
-   load(page,'pose.mp4');expect(page.locator('#analyzeBtn')).to_be_enabled()
-   page.click('#startHereBtn');wait_finish(page);data=report(page)
-   assert data['engine']=='rw-3.0.3-analysis-flow'
-   assert data['summary']['frames']>=5 and data['summary']['trackedFrames']>=1
-   assert any((f.get('metrics',{}).get('leftKnee') or {}).get('value') is not None for f in data['frames'])
-   record(name+'_no_preselected_target_real_inference',passed=True,frames=data['summary']['frames'],tracked=data['summary']['trackedFrames'])
+   load(page,'pose.mp4');scan(page)
+   assert phase(page)=='select-target','One detected person must not automatically become the target'
+   idx,anchor=choose(page);run(page);data=report(page);verify_target(data,idx,anchor)
+   record(name+'_real_single_pose_requires_confirmation',passed=True,frames=data['summary']['frames'])
    page.click('#manualToggle');box=page.locator('#overlay').bounding_box();page.locator('#overlay').click(position={'x':box['width']*.5,'y':box['height']*.55})
    corrected=report(page);assert corrected['summary']['manualCorrections']==1 and corrected['frames']!=data['frames']
-   page.click('#manualToggle');load(page,'pose.mov');select_target(page);page.click('#analyzeBtn');wait_finish(page)
-   record(name+'_mov_repeat_manual_and_export',passed=True)
-   load(page,'four.mp4');page.click('#scanPeopleBtn')
-   page.wait_for_function("document.documentElement.dataset.analysisPhase==='select-target'",timeout=60000)
-   candidates=page.locator('.person-choice').count();assert candidates>=2,{'candidates':candidates,'status':page.inner_text('#status')}
-   page.screenshot(path=str(OUT/f'{name}-people-selection.png'),full_page=True)
-   page.locator('.person-choice').nth(1).click();wait_finish(page);multi=report(page)
-   assert multi['summary']['trackedFrames']>=1
-   record(name+'_multi_person_explicit_choice',passed=True,detected=candidates,tracked=multi['summary']['trackedFrames'])
-   page.screenshot(path=str(OUT/f'{name}-inference.png'),full_page=True)
-   load(page,'blank.mp4');page.click('#startHereBtn')
-   page.wait_for_function("document.documentElement.dataset.analysisPhase==='no-person'",timeout=60000)
-   assert '分析完成' not in page.inner_text('#status');record(name+'_no_person_not_reported_as_success',passed=True)
+   page.click('#manualToggle');load(page,'pose.mov');scan(page);idx,anchor=choose(page);run(page);verify_target(report(page),idx,anchor)
+   record(name+'_mov_manual_edit_and_repeat',passed=True)
+   # Force selection of a NON-FIRST detection and verify the actual reported coordinates.
+   load(page,'four.mp4');scan(page);count=page.locator('.person-choice').count();assert count>=4,count
+   idx,anchor=choose(page,count-1);page.screenshot(path=str(OUT/f'{name}-target-confirmed.png'),full_page=True)
+   run(page);data=report(page);center=verify_target(data,idx,anchor);assert idx!=0
+   record(name+'_real_four_people_nonfirst_locked',passed=True,chosen_index=idx,confirmed_center=anchor,reported_center=center,frames=data['summary']['frames'])
+   # Reselect a different person at a new frame. Older report provenance must not be relabeled.
+   page.click('#clearTargetBtn');old=report(page);assert old['targetSelection']==data['targetSelection']
+   page.evaluate("document.querySelector('#video').currentTime=0")
+   page.wait_for_function("!document.querySelector('#video').seeking")
+   scan(page);idx2,anchor2=choose(page,0);run(page);new=report(page);verify_target(new,idx2,anchor2)
+   assert new['targetSelection']['id']!=data['targetSelection']['id'] and idx2!=idx
+   record(name+'_reselection_new_segment_no_relabel',passed=True)
+   # Drag an explicit quadrant ROI using pointer events, including the portrait WebKit layout.
+   load(page,'four.mp4');page.click('#selectBoxBtn');box=page.locator('#overlay').bounding_box()
+   page.mouse.move(box['x']+box['width']*.01,box['y']+box['height']*.01);page.mouse.down()
+   page.mouse.move(box['x']+box['width']*.49,box['y']+box['height']*.49,steps=12);page.mouse.up()
+   wait_phase(page,['select-target','no-person','no-selected-person','error']);assert page.locator('.person-choice').count()>=1,page.inner_text('#status')
+   idx3,anchor3=choose(page);assert anchor3[0]<.5 and anchor3[1]<.5
+   run(page);roi=report(page);verify_target(roi,idx3,anchor3);assert roi['targetSelection']['method']=='box'
+   record(name+'_explicit_roi_reprojected_and_locked',passed=True)
+   # Changed time invalidates the confirmed snapshot rather than associating it at the wrong instant.
+   load(page,'pose.mp4');scan(page);choose(page)
+   page.evaluate("document.querySelector('#video').currentTime=.3")
+   page.wait_for_function("document.documentElement.dataset.analysisPhase==='select-target'")
    with page.expect_download() as d:page.click('#diagnosticBtn')
-   diag=json.loads(Path(d.value.path()).read_text());assert diag['engine']=='rw-3.0.3-analysis-flow';assert 'frames' in diag['analysis']
-   assert not any(k in diag for k in ['landmarks','athlete','video','image'])
-   record(name+'_diagnostic_export_without_video',passed=True)
-   page.set_input_files('#videoInput',{'name':'broken.mov','mimeType':'video/quicktime','buffer':b'not a video'})
-   page.wait_for_function("document.querySelector('#mediaStatus').dataset.error==='true'")
-   page.click('#startHereBtn');page.wait_for_function("document.documentElement.dataset.analysisPhase==='error'")
-   assert '[MEDIA]' in page.inner_text('#status');record(name+'_bad_video_is_actionable',passed=True)
-   assert not errors,errors;assert not external,external;record(name+'_no_external_runtime_requests',passed=True);page.close()
-   # Failure injection is separate from the real-inference assertions above.
-   page,errors,external=open_page(browser,viewport);pattern='**/vendor/mediapipe/vision_bundle.mjs*'
+   diagnostic=json.loads(Path(d.value.path()).read_text());assert not diagnostic['analysis']['targetSelected']
+   record(name+'_seek_requires_new_confirmation',passed=True)
+   load(page,'blank.mp4');page.click('#startHereBtn');wait_phase(page,['no-person','error']);assert phase(page)=='no-person'
+   record(name+'_no_person_is_not_success',passed=True)
+   assert not errors,errors;assert not external,external;page.close()
+   # Fault injection: real AI finds the seed, then all detections disappear.
+   page,errors,external=open_page(browser,viewport)
+   def inject_loss(route):
+    response=route.fetch();text=response.text();needle='    const full=inferFull(input);'
+    assert needle in text
+    route.fulfill(response=response,body=text.replace(needle,"    if(globalThis.__dropPose)return {landmarks:[]};\n"+needle))
+   page.route('**/ai-loader.js*',inject_loss);page.goto(URL,wait_until='domcontentloaded');wait_ai(page)
+   load(page,'pose.mp4');scan(page);choose(page);page.evaluate('globalThis.__dropPose=true')
+   page.click('#startHereBtn');wait_phase(page,['target-paused','complete','error']);assert phase(page)=='target-paused',page.inner_text('#status')
+   stopped=report(page);assert stopped['summary']['trackedFrames']==1 and stopped['summary']['frames']==2
+   rejected=stopped['frames'][-1];assert rejected['landmarks'] is None and rejected['targetId'] is None
+   assert rejected['metrics']['leftKnee'] is None and stopped['trackingStop']
+   page.screenshot(path=str(OUT/f'{name}-loss-paused.png'),full_page=True)
+   record(name+'_injected_loss_halts_without_bystander_values',passed=True);assert not errors,errors;page.close()
+   # SDK failure must not block media handling; retry remains usable.
+   page,errors,external=open_page(browser,viewport)
+   pattern='**/vendor/mediapipe/vision_bundle.mjs*'
    def reject_sdk(route):route.fulfill(status=503,content_type='text/plain',body='injected SDK failure')
    page.route(pattern,reject_sdk);page.goto(URL,wait_until='domcontentloaded')
    page.wait_for_function("document.querySelector('#engineBadge').textContent.includes('AI 載入失敗')")
-   load(page,'pose.mp4');page.click('[data-tab=guide]');expect(page.locator('#guide')).to_be_visible();page.click('[data-tab=analyze]')
-   page.unroute(pattern,reject_sdk);page.click('#initAi');wait_ai(page);record(name+'_failed_sdk_video_and_retry',passed=True);page.close()
-   page,errors,external=open_page(browser,viewport)
-   loader=(ROOT/'site/ai-loader.js').read_text();assert 'return engine.detect(input);' in loader
-   fail_loader=loader.replace('return engine.detect(input);',"throw new Error('TEST_INJECTED_INFERENCE_FAILURE');")
-   page.route('**/ai-loader.js*',lambda route:route.fulfill(status=200,content_type='application/javascript',body=fail_loader))
-   page.goto(URL,wait_until='domcontentloaded');wait_ai(page);load(page,'pose.mp4');page.click('#startHereBtn')
-   page.wait_for_function("document.documentElement.dataset.analysisPhase==='error'")
-   assert 'AI 推論失敗' in page.inner_text('#engineBadge');assert 'TEST_INJECTED' in page.inner_text('#status')
-   expect(page.locator('#initAi')).to_be_enabled();expect(page.locator('#startHereBtn')).to_be_enabled()
-   record(name+'_inference_error_clears_ready_and_unlocks',passed=True)
+   load(page,'pose.mp4');page.unroute(pattern,reject_sdk);page.click('#initAi');wait_ai(page)
+   page.set_input_files('#videoInput',{'name':'broken.mov','mimeType':'video/quicktime','buffer':b'not a video'})
+   page.wait_for_function("document.querySelector('#mediaStatus').dataset.error==='true'")
+   record(name+'_sdk_retry_and_bad_media_error',passed=True)
    assert not errors,errors;page.close();browser.close()
-except Exception as e:
- results['failure']=str(e);results['traceback']=traceback.format_exc();raise
+except Exception as error:
+ results['failure']=str(error);results['traceback']=traceback.format_exc()
+ try:page.screenshot(path=str(OUT/'failure.png'),full_page=True)
+ except Exception:pass
+ raise
 finally:
  (OUT/'browser-results.json').write_text(json.dumps(results,ensure_ascii=False,indent=2)+'\n');server.shutdown()

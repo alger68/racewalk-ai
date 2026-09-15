@@ -29,7 +29,6 @@ function duplicate(a,b){
 }
 export async function createPoseEngine({onStatus=()=>{}}={}){
  if(typeof WebAssembly==='undefined')throw new Error('此瀏覽器不支援 WebAssembly');
- // MediaPipe owns a dedicated WebGL canvas; never reuse the drawing overlay.
  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=256;
  const gl=canvas.getContext('webgl2');
  if(!gl)throw new Error('無法建立 WebGL2 圖形環境；請確認瀏覽器的硬體加速可用');
@@ -42,47 +41,42 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
   const {FilesetResolver,PoseLandmarker}=await timeout(import(sdkUrl.href),20000,'AI 引擎載入');
   const modelAssetBuffer=await getModel(onStatus);onStatus('初始化 AI（首次載入請稍候）…');
   const vision=await timeout(FilesetResolver.forVisionTasks(new URL('wasm/',SDK_ROOT).href.replace(/\/$/,'')),20000,'WASM 載入');
-  // Seek-based video analysis uses independent frames. Application-level matching
-  // owns identity continuity; SDK temporal video tracking is not claimed.
+  // Seek-based analysis uses independent frames; the application owns identity association.
   engine=await timeout(PoseLandmarker.createFromOptions(vision,{canvas,baseOptions:{modelAssetBuffer,delegate:'CPU'},runningMode:'IMAGE',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35,outputSegmentationMasks:false}),60000,'AI 模型初始化');
-  onStatus('驗證 AI 圖形推論…');
-  frameCanvas.width=256;frameCanvas.height=256;
-  frameContext.fillStyle='#808080';frameContext.fillRect(0,0,256,256);
-  engine.detect(frameContext.getImageData(0,0,256,256));
+  onStatus('驗證 AI 圖形推論…');frameCanvas.width=256;frameCanvas.height=256;frameContext.fillStyle='#808080';frameContext.fillRect(0,0,256,256);engine.detect(frameContext.getImageData(0,0,256,256));
   let closed=false;
   function inferFull(input){return engine.detect(input);}
   return {
    inferenceMode:'IMAGE-per-frame',
-   detectForVideo(source,timestamp){
+   detectForVideo(source,timestamp,options={}){
     if(closed)throw new Error('AI 引擎已關閉，請重新載入');
     if(!Number.isFinite(timestamp)||timestamp<0)throw new Error('無效的影格時間');
-    let input=source;
-    const isVideo=source instanceof HTMLVideoElement;
+    let input=source;const isVideo=source instanceof HTMLVideoElement;
     if(isVideo){
      const width=source.videoWidth,height=source.videoHeight;
      if(source.readyState<2||source.seeking||!width||!height)throw new Error('影片影格尚未解碼，無法送入 AI');
-     if(frameCanvas.width!==width)frameCanvas.width=width;
-     if(frameCanvas.height!==height)frameCanvas.height=height;
-     frameContext.drawImage(source,0,0,width,height);
-     input=frameContext.getImageData(0,0,width,height);
+     if(frameCanvas.width!==width)frameCanvas.width=width;if(frameCanvas.height!==height)frameCanvas.height=height;
+     frameContext.drawImage(source,0,0,width,height);input=frameContext.getImageData(0,0,width,height);
+    }
+    if(isVideo&&options.region){
+     const b=options.region,width=input.width,height=input.height;
+     const x=Math.max(0,Math.floor(b.x1*width)),y=Math.max(0,Math.floor(b.y1*height));
+     const w=Math.min(width-x,Math.ceil((b.x2-b.x1)*width)),h=Math.min(height-y,Math.ceil((b.y2-b.y1)*height));
+     if(!(w>=12&&h>=20))throw new Error('指定框太小或超出影片範圍，請重新框住整位選手');
+     const result=engine.detect(frameContext.getImageData(x,y,w,h));
+     const landmarks=(result.landmarks||[]).map(pose=>pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)})));
+     return {landmarks,worldLandmarks:[],segmentationMasks:[],scanMode:'explicit-user-region'};
     }
     const full=inferFull(input);
-    // The detector downsamples the whole image. Small people can disappear.
-    // Only an empty full-frame result invokes the additional, slower passes.
-    // Every crop result is reprojected into ORIGINAL normalized coordinates.
+    // Empty full-frame detections get a slower tiled fallback, reprojected to original coordinates.
     if(!isVideo||full.landmarks?.length||input.width<720||input.height<480)return full;
     const width=input.width,height=input.height,candidates=[];
     for(const [fx,fy] of [[0,0],[.38,0],[0,.38],[.38,.38]]){
-     const x=Math.floor(fx*width),y=Math.floor(fy*height);
-     const w=Math.min(width-x,Math.ceil(width*.62)),h=Math.min(height-y,Math.ceil(height*.62));
+     const x=Math.floor(fx*width),y=Math.floor(fy*height),w=Math.min(width-x,Math.ceil(width*.62)),h=Math.min(height-y,Math.ceil(height*.62));
      const result=engine.detect(frameContext.getImageData(x,y,w,h));
-     for(const pose of result.landmarks||[]){
-      const mapped=pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)}));
-      const box=bounds(mapped);if(box&&box.area>0)candidates.push({pose:mapped,box});
-     }
+     for(const pose of result.landmarks||[]){const mapped=pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)}));const box=bounds(mapped);if(box&&box.area>0)candidates.push({pose:mapped,box});}
     }
-    candidates.sort((a,b)=>b.box.score-a.box.score);
-    const selected=[];
+    candidates.sort((a,b)=>b.box.score-a.box.score);const selected=[];
     for(const candidate of candidates){if(!selected.some(other=>duplicate(candidate.box,other.box)))selected.push(candidate);if(selected.length===6)break;}
     return {landmarks:selected.map(c=>c.pose),worldLandmarks:[],segmentationMasks:[],scanMode:'tiled-empty-fallback'};
    },

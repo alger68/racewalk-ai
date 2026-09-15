@@ -1,7 +1,7 @@
-name: Test real AI and deploy RaceWalk Lab
+name: Test target lock and deploy RaceWalk Lab
 on:
   push:
-    branches: [main, fix/analysis-entry-3.0.3]
+    branches: [main, fix/strict-target-3.0.4]
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,20 +20,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Core tests and JavaScript syntax
+      - name: Core and target-lock regression tests
         run: |
+          set -o pipefail
+          mkdir -p test-results
           node tests/core.test.mjs
+          node tests/target-lock.test.mjs | tee test-results/target-lock.txt
           for file in site/*.js; do node --check "$file"; done
       - name: Build pinned SDK, WASM and model into site
         run: |
           python scripts/build_site.py
-          python -c "import json,pathlib; p=pathlib.Path('site/asset-manifest.json'); x=json.loads(p.read_text()); x['app']='3.0.3'; p.write_text(json.dumps(x,indent=2)+'\n')"
+          python -c "import json,pathlib; p=pathlib.Path('site/asset-manifest.json'); d=json.loads(p.read_text()); d['app']='3.0.4'; p.write_text(json.dumps(d,indent=2))"
       - name: Install real-browser test dependencies
         run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium webkit
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Real inference, no-selection entry, multi-person choice and recovery
+      - name: Confirmed non-first target, ROI, lost-track stop and recovery
         run: python tests/browser_smoke.py
       - name: Save browser evidence
         if: always()
@@ -43,8 +46,9 @@ jobs:
           path: |
             test-results/*.json
             test-results/*.png
+            test-results/*.txt
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
       - name: Package verified site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -80,7 +84,7 @@ jobs:
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium webkit
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Real inference against the published site
+      - name: Verify confirmed target on published site
         env:
           TEST_BASE_URL: ${{ needs.deploy.outputs.page_url }}
         run: python tests/browser_smoke.py
