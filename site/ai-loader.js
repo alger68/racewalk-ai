@@ -19,10 +19,26 @@ async function getModel(onStatus){
 }
 export async function createPoseEngine({onStatus=()=>{}}={}){
  if(typeof WebAssembly==='undefined')throw new Error('此瀏覽器不支援 WebAssembly');
+ // Do not let the SDK choose OffscreenCanvas merely because its constructor
+ // exists. Some WebKit versions cannot create a WebGL context on that canvas.
+ // This canvas belongs ONLY to MediaPipe, never the 2D overlay/chart.
+ const canvas=document.createElement('canvas');
+ canvas.width=256;canvas.height=256;
+ const gl=canvas.getContext('webgl2');
+ if(!gl)throw new Error('無法建立 WebGL2 圖形環境；請使用支援 WebGL2 的瀏覽器並確認硬體加速可用');
  onStatus(`載入 AI 引擎 ${SDK_VERSION}…`);
  const sdkUrl=new URL('vision_bundle.mjs',SDK_ROOT);sdkUrl.searchParams.set('attempt',String(++sdkAttempt));
  const {FilesetResolver,PoseLandmarker}=await timeout(import(sdkUrl.href),20000,'AI 引擎載入');
  const modelAssetBuffer=await getModel(onStatus);onStatus('初始化 AI（首次載入請稍候）…');
  const vision=await timeout(FilesetResolver.forVisionTasks(new URL('wasm/',SDK_ROOT).href.replace(/\/$/,'')),20000,'WASM 載入');
- return timeout(PoseLandmarker.createFromOptions(vision,{baseOptions:{modelAssetBuffer,delegate:'CPU'},runningMode:'VIDEO',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35,outputSegmentationMasks:false}),60000,'AI 模型初始化');
+ const engine=await timeout(PoseLandmarker.createFromOptions(vision,{canvas,baseOptions:{modelAssetBuffer,delegate:'CPU'},runningMode:'VIDEO',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35,outputSegmentationMasks:false}),60000,'AI 模型初始化');
+ try{
+  // Model construction alone does not establish inference readiness. Exercise
+  // the real image-to-tensor path once before allowing the UI to say ready.
+  onStatus('驗證 AI 圖形推論…');
+  const probe=document.createElement('canvas');probe.width=256;probe.height=256;
+  const ctx=probe.getContext('2d');ctx.fillStyle='#808080';ctx.fillRect(0,0,256,256);
+  engine.detectForVideo(probe,0);
+  return engine;
+ }catch(error){engine.close();throw new Error(`AI 推論自檢失敗：${error.message||error}`);}
 }
