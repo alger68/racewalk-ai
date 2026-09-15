@@ -13,6 +13,9 @@ function updateControls() {
   const ready = !!state.videoUrl && video.readyState >= 2 && Number.isFinite(video.duration) && video.duration > 0;
   $('analyzeBtn').disabled = state.analyzing || !ready || !state.clickPoint;
   $('stopBtn').disabled = !state.analyzing;
+  // The video must remain visible on WebKit. Keep Stop reachable even when
+  // the original controls are above the viewport on a narrow phone screen.
+  $('stopBtn').style.cssText = state.analyzing ? 'position:fixed;right:16px;bottom:16px;z-index:999;background:#991b1b;color:white;padding:14px 24px;box-shadow:0 4px 18px #0004' : '';
   $('initAi').disabled = !!state.aiPromise || state.analyzing;
   for (const id of ['videoInput','timeSlider','prevFrame','nextFrame','manualToggle','manualJoint','fps','sampleFps','groundSlider','sigmaPx','uncertaintyEnabled','playPause']) {
     if ($(id)) $(id).disabled = state.analyzing;
@@ -47,7 +50,10 @@ async function ensureAi() {
 }
 $('initAi').addEventListener('click',()=>{ensureAi().catch(()=>{});});
 
-document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));btn.classList.add('active');$(btn.dataset.tab).classList.add('active'); if(btn.dataset.tab==='report') renderReport(); if(btn.dataset.tab==='records') renderRecords(); if(btn.dataset.tab==='analyze') drawCurrent();}));
+document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{
+  if(state.analyzing){$('status').textContent='分析中，請先按「停止」後再切換頁籤。';return;}
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));btn.classList.add('active');$(btn.dataset.tab).classList.add('active'); if(btn.dataset.tab==='report') renderReport(); if(btn.dataset.tab==='records') renderRecords(); if(btn.dataset.tab==='analyze') drawCurrent();
+}));
 
 function syncCanvas(){const r=video.getBoundingClientRect();const dpr=devicePixelRatio||1;overlay.style.width=`${r.width}px`;overlay.style.height=`${r.height}px`;overlay.width=Math.max(1,Math.round(r.width*dpr));overlay.height=Math.max(1,Math.round(r.height*dpr));octx.setTransform(dpr,0,0,dpr,0,0);}
 window.addEventListener('resize',()=>{syncCanvas();drawCurrent();});
@@ -111,6 +117,20 @@ function seek(t){
     try{if(Math.abs(video.currentTime-t)>.0005)video.currentTime=t;check();}catch(e){clean();reject(e);}
   });
 }
+async function presentFrame(){
+  if(document.hidden)throw new Error('網頁已進入背景，請回到前景後重新分析');
+  const visible=()=>{const r=video.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;};
+  if(!visible()) video.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+  // WebKit may report readyState=4 yet return black pixels for an offscreen
+  // paused video. Wait for presentation AFTER scrolling and AFTER each seek.
+  await new Promise((resolve,reject)=>{
+    let first=0,second=0,done=false;
+    const finish=(error)=>{if(done)return;done=true;clearTimeout(timer);cancelAnimationFrame(first);cancelAnimationFrame(second);error?reject(error):resolve();};
+    const timer=setTimeout(()=>finish(new Error('影片畫面未能呈現，請保持分析頁面在前景')),2000);
+    first=requestAnimationFrame(()=>{second=requestAnimationFrame(()=>finish());});
+  });
+  if(document.hidden||!visible())throw new Error('影片不在可見範圍，請保持分析工作台開啟後重試');
+}
 function metricsFor(f){return computeFrameMetrics(f,{uncertaintyEnabled:$('uncertaintyEnabled').checked,sigmaPx:+$('sigmaPx').value||0,width:video.videoWidth||1920,height:video.videoHeight||1080});}
 function recomputeAll(){state.frames.forEach(f=>f.metrics=metricsFor(f));buildReport();drawChart();drawCurrent();}
 
@@ -125,6 +145,7 @@ async function analyze(){
   let error=null;let started=false;
   try{
     const engine=await ensureAi();if(state.stop)return;
+    await presentFrame();if(state.stop)return;
     started=true;state.frames=[];state.report=null;state.maxPeople=0;
     const sampleFps=Math.max(5,Math.min(60,+$('sampleFps').value||30));const dt=1/sampleFps;
     const start=Math.min(state.clickTime,Math.max(0,video.duration-.001));const end=video.duration;
@@ -133,6 +154,7 @@ async function analyze(){
     for(let index=0;index<count;index++){
       if(state.stop)break;
       const t=Math.min(start+index*dt,Math.max(0,end-.001));await seek(t);if(state.stop)break;
+      await presentFrame();if(state.stop)break;
       state.lastTimestamp=base+Math.round((t-start)*1000);
       const result=engine.detectForVideo(video,state.lastTimestamp);
       const people=result.landmarks||[];state.maxPeople=Math.max(state.maxPeople,people.length);
