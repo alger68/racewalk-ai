@@ -59,14 +59,19 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
      frameContext.drawImage(source,0,0,width,height);input=frameContext.getImageData(0,0,width,height);
     }
     if(isVideo&&options.region){
-     explicitRoiMode=true;
      const b=options.region,width=input.width,height=input.height;
-     const x=Math.max(0,Math.floor(b.x1*width)),y=Math.max(0,Math.floor(b.y1*height));
+     const x=Math.max(0,Math.min(width-1,Math.floor(b.x1*width))),y=Math.max(0,Math.min(height-1,Math.floor(b.y1*height)));
      const w=Math.min(width-x,Math.ceil((b.x2-b.x1)*width)),h=Math.min(height-y,Math.ceil((b.y2-b.y1)*height));
-     if(!(w>=12&&h>=20))throw new Error('指定框太小或超出影片範圍，請重新框住整位選手');
-     const result=engine.detect(frameContext.getImageData(x,y,w,h));
-     const landmarks=(result.landmarks||[]).map(pose=>pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)})));
-     return {landmarks,worldLandmarks:[],segmentationMasks:[],scanMode:'explicit-user-region'};
+     const usable=w>=12&&h>=20;
+     // 使用者自己畫的框不合用要當場講；追蹤器算出來的框不合用不該讓整段分析陣亡。
+     // 那種情況這一格退回全幀掃描，由配對邏輯決定算不算數——一格取不到值是留白，不是失敗。
+     if(!usable&&options.regionSource!=='tracker')throw new Error('指定框太小或超出影片範圍，請重新框住整位選手');
+     if(usable){
+      explicitRoiMode=true;
+      const result=engine.detect(frameContext.getImageData(x,y,w,h));
+      const landmarks=(result.landmarks||[]).map(pose=>pose.map(p=>({...p,x:(x+p.x*w)/width,y:(y+p.y*h)/height,z:(p.z??0)*w/width,visibility:p.x<0||p.x>1||p.y<0||p.y>1?0:(p.visibility??1)})));
+      return {landmarks,worldLandmarks:[],segmentationMasks:[],scanMode:'explicit-user-region'};
+     }
     }
     const full=inferFull(input);
     const number=full.landmarks?.length||0;

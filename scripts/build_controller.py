@@ -13,7 +13,7 @@ def sub(old,new):
 sub("import { createPoseEngine }", "import {ContinuousTarget, dedupePoses, gapIntervals} from './continuity.js?v=3.0.5';\nimport { createPoseEngine }")
 sub("new LockedTarget({id:selected.id", "new ContinuousTarget({id:selected.id")
 sub("const people=(engine.detectForVideo(video,state.lastTimestamp,options).landmarks||[]).filter(lm=>describePose(lm,video.videoWidth/video.videoHeight));", "const people=dedupePoses((engine.detectForVideo(video,state.lastTimestamp,options).landmarks||[]),video.videoWidth/video.videoHeight).filter(lm=>describePose(lm,video.videoWidth/video.videoHeight));")
-sub("const people=index===0?selected.people.map(clonePose):(engine.detectForVideo(video,state.lastTimestamp).landmarks||[]);", "const people=index===0?selected.people.map(clonePose):dedupePoses((engine.detectForVideo(video,state.lastTimestamp,{region:tracker.regionAt(t)}).landmarks||[]),video.videoWidth/video.videoHeight);")
+sub("const people=index===0?selected.people.map(clonePose):(engine.detectForVideo(video,state.lastTimestamp).landmarks||[]);", "const people=index===0?selected.people.map(clonePose):dedupePoses((engine.detectForVideo(video,state.lastTimestamp,{region:tracker.regionAt(t),regionSource:'tracker'}).landmarks||[]),video.videoWidth/video.videoHeight);")
 old="if(!landmarks){frame.metrics={leftKnee:null,rightKnee:null};state.frames.push(frame);state.trackingStop={time:t,state:match.state,reason:match.reason,targetId:selected.id};state.targetSelection=null;state.clickPoint=null;state.pendingTarget=null;$('targetConfirm').hidden=true;drawFrame(frame);break;}"
 new="""if(!landmarks){
     frame.metrics={leftKnee:null,rightKnee:null};state.frames.push(frame);

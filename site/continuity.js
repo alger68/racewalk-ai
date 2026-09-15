@@ -11,6 +11,12 @@ function sameObservation(a,b,aspect){
  // Anatomical shoulder/hip agreement is required; box overlap alone is insufficient.
  return distances.length>=3&&Math.max(...distances)<.45&&Math.sqrt(distances.reduce((s,x)=>s+x*x,0)/distances.length)<.22;
 }
+const clamp=(v,lo,hi)=>v<lo?lo:v>hi?hi:v;
+// 裁切區的下限。比這更小的框對姿態估計沒有意義，而且會被推論層當成無效框。
+const MIN_REGION_W=.08,MIN_REGION_H=.12;
+// velocity 是 Δ位置/Δ時間，取樣間隔短的時候會爆衝（0.1 畫面寬 / 0.033 秒 = 3/秒）。
+// 外推位移設上限，否則預測中心會被甩出畫面。
+const MAX_DRIFT=.25;
 const quality=pose=>[11,12,23,24,25,26,27,28].reduce((s,i)=>s+((pose?.[i]?.visibility??0)*(pose?.[i]?.presence??1)),0);
 export function dedupePoses(people=[],aspect=1){
  const kept=[];
@@ -28,10 +34,15 @@ export class ContinuousTarget {
  regionAt(time){
   const source=this.trial||this.good,d=source.last,velocity=source.velocity;
   const elapsed=Math.min(.30,Math.max(0,time-source.time)),aspect=this.good.aspect;
-  const b=d.box,cx=b.cx+velocity.x*elapsed,cy=b.cy+velocity.y*elapsed;
-  const w=Math.min(.55,Math.max((b.x2-b.x1)*1.25,d.scale*2.1/aspect));
-  const h=Math.min(.85,Math.max((b.y2-b.y1)*1.22,d.scale*3.5));
-  return {x1:Math.max(0,cx-w/2),y1:Math.max(0,cy-h/2),x2:Math.min(1,cx+w/2),y2:Math.min(1,cy+h/2)};
+  const b=d.box;
+  const w=clamp(Math.min(.55,Math.max((b.x2-b.x1)*1.25,d.scale*2.1/aspect)),MIN_REGION_W,1);
+  const h=clamp(Math.min(.85,Math.max((b.y2-b.y1)*1.22,d.scale*3.5)),MIN_REGION_H,1);
+  // 先把預測中心夾回畫面內，再往外展開。
+  // 四個邊各自夾到 [0,1] 會讓 x1 落在 x2 右邊，裁出負寬度的框——
+  // 選手走到畫面邊緣時整段分析會因此中止，實拍上真的發生過。
+  const drift=v=>Number.isFinite(v)?clamp(v*elapsed,-MAX_DRIFT,MAX_DRIFT):0;
+  const cx=clamp(b.cx+drift(velocity.x),w/2,1-w/2),cy=clamp(b.cy+drift(velocity.y),h/2,1-h/2);
+  return {x1:cx-w/2,y1:cy-h/2,x2:cx+w/2,y2:cy+h/2};
  }
  probe(source){
   const clone=new LockedTarget({...this.options});clone.last={...source.last};clone.time=source.time;

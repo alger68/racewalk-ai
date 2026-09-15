@@ -97,6 +97,18 @@ python -m http.server 8000 --directory site
 
 Controller, loader, entry HTML and inherited browser regressions are generated from the audited templates under `src/`. Edit the templates/build transformation, not ignored generated files. The transformation fails on unmatched required source blocks. New continuity logic is in `site/continuity.js`; previous strict association invariants remain in `site/target-lock.js`.
 
+A tracker-predicted crop is clamped as a box, not edge by edge. Velocity is
+`Δposition/Δtime`, so a short sampling interval can produce a very large value; the
+old code extrapolated it unclamped and clamped each of the four edges into [0,1]
+independently, which put `x1` to the right of `x2` whenever the predicted centre left
+the frame. The inference layer rejected the resulting negative-width crop by throwing,
+which ended the whole run. Real footage hit this: 251 of 272 frames were discarded at
+the point the athlete reached the right edge. The extrapolated drift is now bounded,
+the centre is clamped before the box is expanded, and a crop the inference layer would
+still refuse falls back to full-frame for that frame instead of aborting — a frame with
+no measurement is a blank, not a failure. A crop the *user* drew is still rejected out
+loud.
+
 3.0.5 deduplicates near-identical anatomical observations, uses a local target-following crop, continues scanning when measurements are unavailable, and requires three consistent observations before bounded recovery. More than 0.75 s of uncertainty requires explicit reselection; subsequent frames remain null rather than changing target. This trades coverage for caution and is not an identity guarantee.
 
 The pinned 9,398,198-byte pose model is cached separately from the app version where CacheStorage is available. Corrupt cache is rejected. First-time transfer and WASM initialization are distinct; no promise of instant startup on every device.
