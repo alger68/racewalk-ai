@@ -1,4 +1,9 @@
 node_modules/
 .DS_Store
 *.log
-coverage/
+site/vendor/
+site/models/
+site/asset-manifest.json
+site/THIRD_PARTY_NOTICES.txt
+test-results/
+__pycache__/

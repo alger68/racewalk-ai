@@ -1,39 +1,64 @@
-name: Test and deploy RaceWalk Lab 3.0
+name: Test real AI and deploy RaceWalk Lab
 on:
   push:
-    branches: [main]
+    branches: [main, fix/ai-bootstrap-3.0.2]
   workflow_dispatch:
 permissions:
   contents: read
-  pages: write
-  id-token: write
 concurrency:
-  group: racewalk-pages
+  group: racewalk-pages-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Core tests
-        run: node tests/core.test.mjs
-      - name: JavaScript syntax
-        run: node --check site/core.js && node --check site/app.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Core tests and JavaScript syntax
+        run: |
+          node tests/core.test.mjs
+          for file in site/*.js; do node --check "$file"; done
+      - name: Build pinned SDK, WASM and model into site
+        run: python scripts/build_site.py
+      - name: Install real-browser test dependencies
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Chromium and WebKit real inference, media and failure recovery
+        run: python tests/browser_smoke.py
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: |
+            test-results/*.json
+            test-results/*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Package verified site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: test
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-      - name: Deploy to GitHub Pages
+      - name: Deploy tested artifact to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

@@ -1,0 +1,2 @@
+/* Canvas coordinates must match the video rectangle, including mobile layout. */
+.stage{min-height:0}.stage video{height:auto;max-height:none;min-height:150px}.stage canvas{inset:auto;top:0;left:0}#mediaStatus[data-error="true"]{color:#b91c1c}.status{overflow-wrap:anywhere;line-height:1.6}.card,.viewerHead>div{min-width:0}.timeline input{min-width:0}.formgrid>*{min-width:0}
