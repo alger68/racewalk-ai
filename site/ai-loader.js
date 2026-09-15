@@ -41,10 +41,9 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
   const {FilesetResolver,PoseLandmarker}=await timeout(import(sdkUrl.href),20000,'AI 引擎載入');
   const modelAssetBuffer=await getModel(onStatus);onStatus('初始化 AI（首次載入請稍候）…');
   const vision=await timeout(FilesetResolver.forVisionTasks(new URL('wasm/',SDK_ROOT).href.replace(/\/$/,'')),20000,'WASM 載入');
-  // Seek-based analysis uses independent frames; the application owns identity association.
   engine=await timeout(PoseLandmarker.createFromOptions(vision,{canvas,baseOptions:{modelAssetBuffer,delegate:'CPU'},runningMode:'IMAGE',numPoses:6,minPoseDetectionConfidence:.35,minPosePresenceConfidence:.35,minTrackingConfidence:.35,outputSegmentationMasks:false}),60000,'AI 模型初始化');
   onStatus('驗證 AI 圖形推論…');frameCanvas.width=256;frameCanvas.height=256;frameContext.fillStyle='#808080';frameContext.fillRect(0,0,256,256);engine.detect(frameContext.getImageData(0,0,256,256));
-  let closed=false;
+  let closed=false,expectedPeople=0,currentSource=null,explicitRoiMode=false;
   function inferFull(input){return engine.detect(input);}
   return {
    inferenceMode:'IMAGE-per-frame',
@@ -53,12 +52,14 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
     if(!Number.isFinite(timestamp)||timestamp<0)throw new Error('無效的影格時間');
     let input=source;const isVideo=source instanceof HTMLVideoElement;
     if(isVideo){
+     if(source.currentSrc!==currentSource){currentSource=source.currentSrc;expectedPeople=0;explicitRoiMode=false;}
      const width=source.videoWidth,height=source.videoHeight;
      if(source.readyState<2||source.seeking||!width||!height)throw new Error('影片影格尚未解碼，無法送入 AI');
      if(frameCanvas.width!==width)frameCanvas.width=width;if(frameCanvas.height!==height)frameCanvas.height=height;
      frameContext.drawImage(source,0,0,width,height);input=frameContext.getImageData(0,0,width,height);
     }
     if(isVideo&&options.region){
+     explicitRoiMode=true;
      const b=options.region,width=input.width,height=input.height;
      const x=Math.max(0,Math.floor(b.x1*width)),y=Math.max(0,Math.floor(b.y1*height));
      const w=Math.min(width-x,Math.ceil((b.x2-b.x1)*width)),h=Math.min(height-y,Math.ceil((b.y2-b.y1)*height));
@@ -68,9 +69,15 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
      return {landmarks,worldLandmarks:[],segmentationMasks:[],scanMode:'explicit-user-region'};
     }
     const full=inferFull(input);
-    // Empty full-frame detections get a slower tiled fallback, reprojected to original coordinates.
-    if(!isVideo||full.landmarks?.length||input.width<720||input.height<480)return full;
+    const number=full.landmarks?.length||0;
+    // A nonempty result is not proof that the selected person was detected.
+    // Recheck a partial candidate list; explicit ROI selection enables the slower
+    // multi-scale path for this video. No identity is inferred from the count.
+    const rescan=explicitRoiMode||number===0||number<expectedPeople;
+    expectedPeople=Math.max(expectedPeople,number);
+    if(!isVideo||!rescan||input.width<720||input.height<480)return full;
     const width=input.width,height=input.height,candidates=[];
+    for(const pose of full.landmarks||[]){const box=bounds(pose);if(box)candidates.push({pose,box});}
     for(const [fx,fy] of [[0,0],[.38,0],[0,.38],[.38,.38]]){
      const x=Math.floor(fx*width),y=Math.floor(fy*height),w=Math.min(width-x,Math.ceil(width*.62)),h=Math.min(height-y,Math.ceil(height*.62));
      const result=engine.detect(frameContext.getImageData(x,y,w,h));
@@ -78,7 +85,8 @@ export async function createPoseEngine({onStatus=()=>{}}={}){
     }
     candidates.sort((a,b)=>b.box.score-a.box.score);const selected=[];
     for(const candidate of candidates){if(!selected.some(other=>duplicate(candidate.box,other.box)))selected.push(candidate);if(selected.length===6)break;}
-    return {landmarks:selected.map(c=>c.pose),worldLandmarks:[],segmentationMasks:[],scanMode:'tiled-empty-fallback'};
+    expectedPeople=Math.max(expectedPeople,selected.length);
+    return {landmarks:selected.map(c=>c.pose),worldLandmarks:[],segmentationMasks:[],scanMode:'tiled-candidate-recovery'};
    },
    close(){if(closed)return;closed=true;try{engine.close();}finally{gl.getExtension('WEBGL_lose_context')?.loseContext();frameCanvas.width=0;frameCanvas.height=0;}}
   };
