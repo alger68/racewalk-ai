@@ -1,0 +1,45 @@
+name: Probe browser model cache
+on:
+  push:
+    branches: [audit/runtime-305-20260916]
+    paths: [.github/workflows/cache-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install playwright==1.57.0 && python -m playwright install --with-deps chromium webkit
+      - name: Inspect actual cache API outcomes without changing app
+        run: |
+          mkdir -p cache-probe
+          cat > cache_probe.py <<'PY'
+          import json,time
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          out=[]
+          hook="""(()=>{window.__cacheOps=[];try{const open=CacheStorage.prototype.open;CacheStorage.prototype.open=async function(...a){try{const r=await open.apply(this,a);window.__cacheOps.push({op:'open',ok:true});return r}catch(e){window.__cacheOps.push({op:'open',ok:false,error:String(e)});throw e}};const put=Cache.prototype.put;Cache.prototype.put=async function(...a){try{const r=await put.apply(this,a);window.__cacheOps.push({op:'put',ok:true});return r}catch(e){window.__cacheOps.push({op:'put',ok:false,error:String(e)});throw e}};}catch(e){window.__cacheOps.push({op:'hook',error:String(e)})}})()"""
+          snap="""async()=>{const r={ops:window.__cacheOps,secure:isSecureContext,hasCache:!!globalThis.caches,badge:document.getElementById('engineBadge').textContent};try{r.names=await caches.keys();const c=await caches.open('racewalk-models-v1');r.entries=(await c.keys()).map(x=>x.url);for(const k of await c.keys()){const b=await(await c.match(k)).arrayBuffer();r.bytes=b.byteLength;r.sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',b)),n=>n.toString(16).padStart(2,'0')).join('');}}catch(e){r.error=String(e)}return r}"""
+          with sync_playwright() as p:
+           for name in ['chromium','webkit']:
+            opts={'headless':True}
+            if name=='chromium':opts['args']=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']
+            b=getattr(p,name).launch(**opts);c=b.new_context();c.add_init_script(hook);pg=c.new_page()
+            def ready():pg.wait_for_function("/AI 已載入|AI 載入失敗/.test(document.getElementById('engineBadge').textContent)",timeout=120000)
+            pg.goto('https://alger68.github.io/racewalk-ai/',wait_until='domcontentloaded');ready();out.append({'browser':name,'stage':'cold',**pg.evaluate(snap)})
+            pg.reload(wait_until='domcontentloaded');ready();out.append({'browser':name,'stage':'same_tab_reload',**pg.evaluate(snap)})
+            pg.close();pg=c.new_page();pg.goto('https://alger68.github.io/racewalk-ai/',wait_until='domcontentloaded');ready();out.append({'browser':name,'stage':'new_tab',**pg.evaluate(snap)})
+            c.close();b.close()
+          Path('cache-probe/cache-probe.json').write_text(json.dumps(out,ensure_ascii=False,indent=2));print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+          python cache_probe.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-probe-evidence
+          path: cache-probe/
+          retention-days: 14
