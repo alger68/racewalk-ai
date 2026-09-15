@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="競走 TR54 騰空粗篩系統的現況、下一步與被實作推翻的原規劃。">
+<style>
+:root{color-scheme:light dark;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+</style>
+<title>競走影片 AI 分析規劃書</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700;900&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#EDEFEC; --surface:#F8F9F7; --sunk:#E3E6E1;
+  --ink:#171A18; --ink-2:#3B423E; --muted:#5C6360; --faint:#858C88;
+  --rule:#D2D7D1; --rule-soft:#DFE3DD;
+  --card:#B8332A;        /* 紅卡 */
+  --paddle:#9C7008;      /* 黃牌 */
+  --held:#2D6A4C;        /* 未出牌 */
+  --card-bg:#F6E3E1; --paddle-bg:#F5EAD2; --held-bg:#DDEBE3;
+  --serif:"Noto Serif TC","Songti TC","SimSun",serif;
+  --sans:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Menlo,Consolas,monospace;
+  --measure:40em;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#141715; --surface:#1C201D; --sunk:#101312;
+    --ink:#E4E8E4; --ink-2:#C2C9C4; --muted:#98A09B; --faint:#78807B;
+    --rule:#2E3430; --rule-soft:#262B28;
+    --card:#E5736A; --paddle:#D9AE45; --held:#67A886;
+    --card-bg:#2C1E1C; --paddle-bg:#2A2419; --held-bg:#18271F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#141715; --surface:#1C201D; --sunk:#101312;
+  --ink:#E4E8E4; --ink-2:#C2C9C4; --muted:#98A09B; --faint:#78807B;
+  --rule:#2E3430; --rule-soft:#262B28;
+  --card:#E5736A; --paddle:#D9AE45; --held:#67A886;
+  --card-bg:#2C1E1C; --paddle-bg:#2A2419; --held-bg:#18271F;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:16.5px; line-height:1.85;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding-inline:22px; padding-block:0}
+@media (min-width:1040px){ .wrap{max-width:calc(var(--measure) + 190px); padding-left:212px} }
+
+/* ---------- masthead ---------- */
+.mast{padding-block:64px 40px; border-bottom:1px solid var(--rule)}
+.eyebrow{
+  font-family:var(--mono); font-size:11.5px; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; color:var(--faint);
+  display:flex; flex-wrap:wrap; gap:6px 16px; margin-bottom:22px;
+}
+h1{
+  font-family:var(--serif); font-weight:900; font-size:clamp(34px,7vw,50px);
+  line-height:1.24; letter-spacing:.005em; margin:0; text-wrap:balance;
+}
+.mast-sub{margin:20px 0 0; color:var(--ink-2); font-size:16px}
+.mast-sub strong{font-weight:700; color:var(--ink)}
+
+.meta{
+  display:flex; flex-wrap:wrap; gap:10px 28px; margin-top:26px;
+  font-family:var(--mono); font-size:12.5px; color:var(--muted);
+}
+.meta b{color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums}
+
+/* ---------- section scaffolding ---------- */
+section{padding-block:52px; border-bottom:1px solid var(--rule-soft)}
+section:last-of-type{border-bottom:0}
+h2{
+  font-family:var(--serif); font-weight:700; font-size:clamp(23px,4.4vw,29px);
+  line-height:1.4; margin:0 0 8px; text-wrap:balance; position:relative;
+}
+.secno{
+  font-family:var(--mono); font-size:11.5px; font-weight:600; letter-spacing:.14em;
+  color:var(--card); text-transform:uppercase; display:block; margin-bottom:10px;
+}
+@media (min-width:1040px){
+  section{position:relative}
+  .secno{position:absolute; left:-190px; top:.62em; width:150px; text-align:right; margin:0}
+}
+h3{
+  font-family:var(--sans); font-weight:700; font-size:17.5px; line-height:1.55;
+  margin:38px 0 10px; letter-spacing:.01em;
+}
+p{margin:0 0 15px}
+p:last-child{margin-bottom:0}
+strong{font-weight:700}
+a{color:var(--card); text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--card); outline-offset:3px; border-radius:2px}
+
+code,.m{font-family:var(--mono); font-size:.855em; font-variant-numeric:tabular-nums}
+code{background:var(--sunk); padding:.12em .36em; border-radius:3px; color:var(--ink-2)}
+
+ul{margin:0 0 15px; padding-left:0; list-style:none; display:flex; flex-direction:column; gap:9px}
+ul li{padding-left:20px; position:relative}
+ul li::before{
+  content:""; position:absolute; left:2px; top:.78em;
+  width:6px; height:1.5px; background:var(--faint);
+}
+ol{margin:0 0 15px; padding-left:1.5em; display:flex; flex-direction:column; gap:9px}
+ol li::marker{font-family:var(--mono); font-size:.85em; color:var(--muted)}
+
+/* ---------- the thesis ---------- */
+.thesis{
+  margin:34px 0; padding:30px 26px 28px; background:var(--surface);
+  border-left:4px solid var(--card); border-radius:0 4px 4px 0;
+}
+.thesis .lead{
+  font-family:var(--serif); font-weight:700; font-size:clamp(19px,3.4vw,23px);
+  line-height:1.62; margin:0 0 14px; color:var(--ink); text-wrap:balance;
+}
+.thesis p:not(.lead){font-size:15.5px; color:var(--ink-2); margin:0 0 10px}
+.thesis p:last-child{margin-bottom:0}
+
+/* ---------- paddle glyphs ---------- */
+.rules{display:flex; flex-direction:column; gap:14px; margin:22px 0 4px; padding:0; list-style:none}
+.rules li{display:flex; gap:16px; align-items:flex-start; padding-left:0}
+.rules li::before{display:none}
+.glyph{
+  flex:none; width:44px; height:44px; display:grid; place-items:center;
+  border:1.5px solid var(--rule); border-radius:5px; background:var(--surface);
+  font-family:var(--mono); font-size:21px; font-weight:600; color:var(--card);
+  line-height:1;
+}
+.rules .rname{font-weight:700; display:block}
+.rules .rbody{font-size:15.5px; color:var(--ink-2)}
+
+/* ---------- pipeline ---------- */
+.pipe{display:flex; flex-direction:column; margin:26px 0 8px}
+.node{
+  display:grid; grid-template-columns:58px 1fr; gap:14px;
+  padding:14px 16px 14px 12px; background:var(--surface);
+  border:1px solid var(--rule-soft); border-radius:5px;
+}
+.node.flag{border-color:var(--paddle); background:var(--paddle-bg)}
+.nid{
+  font-family:var(--mono); font-size:12.5px; font-weight:600; color:var(--faint);
+  letter-spacing:.06em; padding-top:.28em;
+}
+.node.flag .nid{color:var(--paddle)}
+.nname{font-weight:700; font-size:15.5px; line-height:1.5}
+.ndet{font-size:14px; line-height:1.72; color:var(--muted); margin-top:3px}
+.ndet .m{color:var(--ink-2)}
+.arrow{
+  height:16px; margin-left:33px; border-left:1.5px dashed var(--rule);
+}
+.flagnote{
+  margin-top:6px; font-size:14px; font-weight:700; color:var(--paddle);
+  line-height:1.6;
+}
+
+/* ---------- tables ---------- */
+.tscroll{overflow-x:auto; margin:22px 0 4px; -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; min-width:400px; font-size:14.5px}
+th,td{text-align:left; padding:11px 14px 11px 0; vertical-align:top; line-height:1.68}
+th{
+  font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--faint); border-bottom:1.5px solid var(--rule);
+  padding-bottom:8px; white-space:nowrap;
+}
+td{border-bottom:1px solid var(--rule-soft); color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td:first-child{color:var(--ink); padding-right:20px}
+.pill{
+  display:inline-block; font-family:var(--mono); font-size:11.5px; font-weight:600;
+  padding:3px 9px; border-radius:3px; white-space:nowrap; letter-spacing:.03em;
+}
+.p-held{background:var(--held-bg); color:var(--held)}
+.p-paddle{background:var(--paddle-bg); color:var(--paddle)}
+.p-card{background:var(--card-bg); color:var(--card)}
+.legend{
+  display:flex; flex-wrap:wrap; gap:8px 18px; margin:18px 0 0;
+  font-size:13px; color:var(--muted); align-items:center;
+}
+
+/* ---------- priorities ---------- */
+.prio{
+  margin:26px 0; padding:24px 22px; background:var(--surface);
+  border:1px solid var(--rule-soft); border-radius:5px;
+}
+.prio.block{border-color:var(--card); background:var(--card-bg)}
+.ptag{
+  display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px;
+}
+.pcode{
+  font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:.08em;
+  color:var(--faint);
+}
+.prio.block .pcode{color:var(--card)}
+.ptitle{font-family:var(--serif); font-weight:700; font-size:19px; line-height:1.4}
+.prio p{font-size:15px; color:var(--ink-2)}
+.prio ul li{font-size:15px; color:var(--ink-2)}
+.accept{
+  margin-top:14px; padding-top:13px; border-top:1px solid var(--rule);
+  font-size:14.5px; color:var(--ink-2);
+}
+.accept b{
+  font-family:var(--mono); font-size:11px; font-weight:600; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--faint); display:block; margin-bottom:4px;
+}
+
+/* ---------- overturned ---------- */
+.turn{
+  display:grid; gap:4px 18px; padding:18px 0; border-bottom:1px solid var(--rule-soft);
+}
+.turn:last-of-type{border-bottom:0}
+.tmove{
+  font-family:var(--mono); font-size:13.5px; font-weight:500; line-height:1.65;
+  color:var(--ink); font-variant-numeric:tabular-nums;
+}
+.tmove .was{color:var(--faint); text-decoration:line-through; text-decoration-thickness:1px}
+.tmove .to{color:var(--card); padding:0 4px}
+.twhy{font-size:15px; color:var(--ink-2); line-height:1.8}
+
+/* ---------- closing ---------- */
+.close{
+  padding-block:56px 72px;
+}
+.close p{
+  font-family:var(--serif); font-weight:700; font-size:clamp(20px,4vw,26px);
+  line-height:1.6; text-wrap:balance; margin:0;
+}
+.close em{font-style:normal; color:var(--card)}
+footer{
+  padding-block:0 60px; font-family:var(--mono); font-size:12px; color:var(--faint);
+  line-height:1.9;
+}
+</style>
+
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="eyebrow">
+    <span>RaceWalk Lab 3.0.5</span><span>World Athletics TR54</span><span>更新 2026-09-15</span>
+  </div>
+  <h1>競走影片 AI 分析規劃書</h1>
+  <p class="mast-sub">本文是<strong>現況與下一步</strong>，不是原始構想的存檔。原始規劃已有數處被實作推翻；被推翻的部分留在第六節，不刪除——那些是這個專案花代價學到的東西。</p>
+  <div class="meta">
+    <span>不變式測試 <b>34</b> 例</span>
+    <span>報表 schema <b>5</b></span>
+    <span>實拍驗證 <b>0</b> 段</span>
+  </div>
+</header>
+
+<section>
+  <span class="secno">一 / Context</span>
+  <h2>為什麼做</h2>
+  <p>競走是田徑中唯一「靠裁判肉眼即時判定技術犯規」的項目。World Athletics 規則 TR54 只有兩條技術要求：</p>
+
+  <ul class="rules">
+    <li>
+      <span class="glyph" aria-hidden="true">~</span>
+      <span><span class="rname">不得有肉眼可見的騰空</span><span class="rbody">loss of contact。裁判黃牌符號 <span class="m">~</span>。</span></span>
+    </li>
+    <li>
+      <span class="glyph" aria-hidden="true">&gt;</span>
+      <span><span class="rname">前導腳自觸地到通過身體垂直位置不得彎膝</span><span class="rbody">bent knee。符號 <span class="m">&gt;</span>。</span></span>
+    </li>
+  </ul>
+
+  <p style="margin-top:22px">三位不同裁判各一張紅卡即失格（部分賽會改用罰時區）。條文整理見 <code>docs/RULES.md</code>。</p>
+  <p>問題在於判定完全依賴人眼、瞬間、主觀。而<strong>菁英選手的騰空時間本來就在 20–40 ms 之間——物理上幾乎人人都騰空，差別只在看不看得見。</strong></p>
+
+  <div class="thesis">
+    <p class="lead">規則寫的是「肉眼可見的」騰空，不是「有沒有騰空」。</p>
+    <p>一個只回答 <span class="m">airborne = true/false</span> 的系統，會把幾乎所有合格選手標成犯規，直接失去可用性。</p>
+    <p>這條前提現在有了具體實作：<span class="m">site/core.js</span> 的 <span class="m">DETECTION_BANDS</span> 不比大小，而是把騰空長度對應到「文獻報告過裁判看不看得見」。</p>
+  </div>
+
+  <h3>定位與界線</h3>
+  <ul>
+    <li>本系統是<strong>輔助分析工具</strong>，不是判罰工具。</li>
+    <li>輸出一律標示「疑似／待人工複核」。</li>
+    <li><strong>規則面的支持：</strong>TR54.7.8（2026）只授權裁判用手持裝置<strong>登錄</strong>自己的判定；2022 年起更禁止鞋內含 sensing／intelligent 技術，而在此之前 IAAF 曾試驗電子鞋墊。也就是說國際總會<strong>試過</strong>用感測器判觸地，現行規範是往回收的。這不是本專案的自我設限，是現行國際規範的方向。出處與核對狀態見 <code>docs/RULES.md</code>。</li>
+  </ul>
+</section>
+
+<section>
+  <span class="secno">二 / 現況</span>
+  <h2>實際長成什麼樣</h2>
+  <p><strong>不是原規劃的 Python 管線。</strong>目前是一個純瀏覽器工具（RaceWalk Lab 3.0.5），影片不上傳、不進版控，全部在使用者機器上跑完。</p>
+
+  <div class="pipe">
+    <div class="node"><span class="nid">N0</span><span><span class="nname">影片輸入</span><span class="ndet"><span class="m">&lt;video&gt;</span> 直接讀本機檔；不解碼成影格檔</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N1</span><span><span class="nname">取樣</span><span class="ndet">以 <span class="m">sampleFps</span> 逐時間點抓畫面；無 VFR 校正、無鏡頭標定</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N2</span><span><span class="nname">姿態與目標鎖定</span><span class="ndet">MediaPipe Pose（33 點，含 heel／foot_index）。<span class="m">target-lock.js</span> 由使用者點選指定選手，嚴格關聯不變式；<span class="m">continuity.js</span> 取不到值時繼續掃描，不中止整段。</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N3</span><span><span class="nname">地面線</span><span class="ndet"><span class="m">estimateGroundY</span>：取足部高度 96 百分位（保守）</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N4</span><span><span class="nname">訊號處理</span><span class="ndet"><span class="m">lowpass</span>（零相位、鏡像 padding、狀態參考 <span class="m">x[0]</span>）；<span class="m">residualNoise</span> → 雜訊自適應觸地門檻；<span class="m">fillGaps</span>、<span class="m">cleanRuns</span></span></span></div>
+    <div class="arrow"></div>
+    <div class="node flag"><span class="nid">N5</span><span><span class="nname">觸地三態</span><span class="ndet"><span class="m">contactStates</span>：contact ／ off ／ unknown</span><span class="flagnote">unknown 絕不可讀成 off，否則遮擋會被製造成騰空。</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N6</span><span><span class="nname">取樣界線</span><span class="ndet"><span class="m">flightIntervals</span>：<span class="m">lowerMs = (k−1)Δ</span> 嚴謹；<span class="m">upperMs</span> 非嚴謹</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N7</span><span><span class="nname">規則對應量</span><span class="ndet"><span class="m">supportKnee</span>：觸地 → <span class="m">verticalSupportIndex</span> 之間的最小膝角</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N8</span><span><span class="nname">可見性分帶</span><span class="ndet"><span class="m">judgeDetection</span>：文獻三帶，不是門檻比大小</span></span></div>
+    <div class="arrow"></div>
+    <div class="node"><span class="nid">N9</span><span><span class="nname">報表</span><span class="ndet">schema 5；每段附 detection、證據敘述與出處</span></span></div>
+  </div>
+
+  <h3>已建立的核心不變式</h3>
+  <p>這些是 <code>tests/contact.test.mjs</code>（34 例）守住的性質，不是願望。</p>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>不變式</th><th>為什麼重要</th></tr></thead>
+      <tbody>
+        <tr><td><span class="m">lowerMs</span> 永不超過真值</td><td>這是整個粗篩的可信度來源，任何幀率都成立</td></tr>
+        <tr><td><span class="m">upperMs</span> <strong>不是</strong>嚴謹上界</td><td>門檻有寬度，剛離地的腳仍被標 contact；已寫成測試記錄</td></tr>
+        <tr><td>端點／unknown 夾住的區段一律丟棄</td><td>沒觀察到起訖就推不出界線</td></tr>
+        <tr><td>遮擋不會變成騰空</td><td>三態遮罩的唯一目的</td></tr>
+        <tr><td>30 ms 合規騰空在 240／120／60／30 fps 都不被標記</td><td>低幀率以<strong>漏報</strong>而非誤報的形式失去靈敏度</td></tr>
+        <tr><td>120 ms 騰空在四種幀率都證得出來</td><td>粗篩的下限能力</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <span class="secno">三 / 下一步</span>
+  <h2>依序，不可跳</h2>
+
+  <div class="prio block">
+    <div class="ptag"><span class="pcode">P0 · 阻塞項</span><span class="ptitle">實拍與校準</span></div>
+    <p><strong>到目前為止的每一個數字都來自合成資料。</strong>沒有任何一段真實影片跑過完整流程。下列參數全部未校準：</p>
+    <ul>
+      <li>觸地門檻 <span class="m">0.018</span>（正規化座標）</li>
+      <li>支撐期膝角的犯規判準——<strong>目前程式裡根本沒有這個門檻</strong>，報表只給角度，由人判讀；要訂一個數字出來，必須先有實拍與裁判對照</li>
+      <li><span class="m">DETECTION_BANDS</span> 的三帶邊界對應到真實裁判行為的程度</li>
+      <li>非矢狀面拍攝造成的膝角偏差量</li>
+    </ul>
+    <p>要做的事：依 <span class="m">docs/CAPTURE_GUIDE.md</span> 試拍 10–30 段（手機 240 fps 慢動作即可，但要確認不是後製轉出的假慢動作——指南裡有 <span class="m">ffprobe</span> 檢查法），跑過工具，逐段人工核對觸地時刻。</p>
+    <p class="accept"><b>驗收</b>IC／TO 時刻與人工標註誤差 ≤ 1 影格；<span class="m">lowerMs</span> 的嚴謹性在真實影片上不被推翻——沒有任何一段實際騰空短於系統給的下界。</p>
+  </div>
+
+  <div class="prio">
+    <div class="ptag"><span class="pcode">P1</span><span class="ptitle">裁判紅卡對照</span></div>
+    <p>取有紅卡紀錄的比賽影片，逐張紅卡對照系統算出的 <span class="m">lowerMs</span> 與分帶。</p>
+    <p class="accept"><b>驗收</b>不是追求高召回率，而是回答「分帶與裁判行為對不對得起來」。若對不起來，正確反應是<strong>修分帶或承認測不到</strong>，不是把門檻調到好看。</p>
+  </div>
+
+  <div class="prio">
+    <div class="ptag"><span class="pcode">P2</span><span class="ptitle">集團場景的目標鎖定</span></div>
+    <p>真實比賽畫面暴露了遮擋與多人交錯的問題。3.0.4／3.0.5 已做了嚴格關聯與連續性恢復，但<strong>那不是身分保證</strong>。</p>
+    <p class="accept"><b>驗收</b>一段有超車與遮擋的實拍，目標不會在沒有明示重選的情況下換人。</p>
+  </div>
+
+  <div class="prio">
+    <div class="ptag"><span class="pcode">P3</span><span class="ptitle">證據輸出</span></div>
+    <p>每段疑似區間切出前後 0.5 s 影片 + 骨架疊圖，供人工複查。目前只有時間碼。</p>
+  </div>
+
+  <div class="prio">
+    <div class="ptag"><span class="pcode">P4 · 選配</span><span class="ptitle">研究輸出</span></div>
+    <p>逐步伐 CSV／Parquet 匯出，供研究使用。</p>
+  </div>
+</section>
+
+<section>
+  <span class="secno">四 / 拍攝</span>
+  <h2>設備規格</h2>
+  <p>完整版見 <code>docs/CAPTURE_GUIDE.md</code>。重點只有一句：</p>
+
+  <div class="thesis">
+    <p class="lead">騰空只有 20–40 ms，幀率決定這個專案的上限。</p>
+  </div>
+
+  <ul>
+    <li>≥ <span class="m">240 fps</span>（每幀 4.2 ms）；<span class="m">120 fps</span> 為下限；<span class="m">60 fps</span> 不足以做騰空粗篩</li>
+    <li>快門 ≥ <span class="m">1/1000 s</span>——動態模糊會糊掉腳與地面的接觸邊界</li>
+    <li>1080p 足夠；<strong>4K@30fps 對本專案毫無用處</strong></li>
+    <li>側向機位、光軸垂直於行進方向、鏡頭高度約 0.8–1.0 m</li>
+    <li>入門方案 $0：手機 240 fps 慢動作 + 三腳架 + 充足日光。<strong>建議從這裡開始</strong></li>
+  </ul>
+</section>
+
+<section>
+  <span class="secno">五 / 風險</span>
+  <h2>什麼守住了，什麼沒有</h2>
+  <div class="tscroll">
+    <table>
+      <thead><tr><th>風險</th><th>對策</th><th>現況</th></tr></thead>
+      <tbody>
+        <tr><td>「肉眼可見」無客觀定義</td><td>不定義；輸出長度 + 文獻分帶，每帶附出處</td><td><span class="pill p-held">已實作</span></td></tr>
+        <tr><td>幀率不足導致不可靠</td><td>低幀率以漏報形式失去靈敏度，不誤報</td><td><span class="pill p-held">測試守住</span></td></tr>
+        <tr><td>遮擋被誤讀成騰空</td><td>三態遮罩，unknown 不當 off</td><td><span class="pill p-held">測試守住</span></td></tr>
+        <tr><td>把工具當判罰依據</td><td>UI 與報表全面標示；不提供自動失格</td><td><span class="pill p-held">已實作</span></td></tr>
+        <tr><td>選手肖像與個資</td><td>影片不離開本機、不進版控、不上傳 CI</td><td><span class="pill p-held">架構保證</span></td></tr>
+        <tr><td>非矢狀面的膝角偏差</td><td>已知會系統性偏小</td><td><span class="pill p-paddle">偏差未校準</span></td></tr>
+        <tr><td>集團中追錯人</td><td>嚴格關聯 + 明示重選</td><td><span class="pill p-paddle">非身分保證</span></td></tr>
+        <tr><td>所有數字都來自合成資料</td><td>—</td><td><span class="pill p-card">未解 · 見 P0</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="legend">
+    <span><span class="pill p-held">未出牌</span> 已有測試或架構守住</span>
+    <span><span class="pill p-paddle">黃牌</span> 已知、已標示、未量化</span>
+    <span><span class="pill p-card">紅卡</span> 會讓結論失效</span>
+  </p>
+</section>
+
+<section>
+  <span class="secno">六 / 推翻</span>
+  <h2>原規劃被改掉的部分</h2>
+  <p>保留這節是因為這些是花代價換到的。</p>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">Python + ffmpeg + RTMPose + FastAPI</span><span class="to">→</span>純瀏覽器工具</div>
+    <div class="twhy">架構整個換掉。代價是失去 ffmpeg 的 VFR 校正、鏡頭標定與 homography；換到的是影片完全不離開使用者機器，以及零安裝。就本專案的個資風險而言這筆交易划算，但<strong>像素→公尺的換算目前做不到</strong>，步長與速度因此不在輸出裡。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">先做精確量測</span><span class="to">→</span>先做可疑片段粗篩</div>
+    <div class="twhy">這是最大的一次轉向。原規劃的 M3 驗收寫「騰空時間 MAE ≤ 8 ms」——那要求系統給出點估計。實際上取樣界線給得出<strong>嚴謹的下界</strong>，卻給不出嚴謹的上界。與其給一個沒有保證的點估計，不如給一個保證成立的下界。粗篩因此比量測誠實。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">低通截止 10–12 Hz</span><span class="to">→</span>50 Hz</div>
+    <div class="twhy">步態分析的慣用值會直接抹掉 20–40 ms 的觸地轉折。這在原規劃裡被寫成「不可過度平滑」，但給的數字本身就是過度平滑。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">固定觸地門檻</span><span class="to">→</span>雜訊自適應</div>
+    <div class="twhy">固定 0.25 帶來 ±11 ms 偏差；掃到 0.06 後降到 1 ms 以內，再加上以二階差分估計的殘餘雜訊動態放寬。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">斜率外插補償</span><span class="to">→</span>移除</div>
+    <div class="twhy">足部軌跡在接近地面時變陡，線性外插過度修正約 66%。這個失敗被記錄下來，而不是留在程式裡。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">40 ms 硬門檻</span><span class="to">→</span>文獻分帶</div>
+    <div class="twhy">文獻只撐得起兩個錨點：40 ms 以下無偵測報告，40–45 ms 區間 8 位國際裁判中 3 位察覺。拿兩點擬曲線，中間數字全是編的。見 <code>docs/RULES.md</code>。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">整段最小膝角</span><span class="to">→</span>支撐期最小膝角</div>
+    <div class="twhy">擺動期彎膝是正常動作，混進去得到的是一個與 TR54 無關的數字。</div>
+  </div>
+
+  <div class="turn">
+    <div class="tmove"><span class="was">原時程 18–22 週</span><span class="to">→</span>已無意義</div>
+    <div class="twhy">這個估計建立在上面那條管線上。現在的瓶頸不是開發工時，是<strong>還沒有一段真實影片</strong>。</div>
+  </div>
+
+  <h3>尚未收拾的殘留</h3>
+  <ul>
+    <li><code>racewalk/</code>、<code>tools/</code> 只剩 3.0 重建前的殘骸（<span class="m">__pycache__</span>、<span class="m">port-fixtures.json</span>），對應的 Python 實作與 <span class="m">verify-port.mjs</span> 已不在。<strong>跨實作數值驗證目前沒有在跑。</strong></li>
+    <li>舊的 <code>docs/ANNOTATION.md</code>、<code>docs/DATA_CONTRACTS.md</code> 同樣在重建中被刪，且其 schema 描述的是已廢棄的 Parquet 管線，未還原。</li>
+  </ul>
+</section>
+
+<div class="close">
+  <p>演算法該守的性質，測試已經守住了。<br>現在缺的不是程式碼，<em>是一段你實際拍的影片。</em></p>
+</div>
+
+<footer>
+  alger68/racewalk-ai · docs/PLAN.md<br>
+  輔助分析工具，非正式判定。正式比賽的判定權屬於人類裁判。
+</footer>
+
+</div>
+</body>
+</html>
