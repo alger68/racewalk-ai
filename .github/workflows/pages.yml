@@ -54,6 +54,8 @@ jobs:
             test-results/*.png
             test-results/*.txt
           retention-days: 14
+      - name: List what goes into the Pages artifact
+        run: find site -maxdepth 1 -type f | sort
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -94,6 +96,17 @@ jobs:
         run: |
           python tests/browser_smoke.py
           python tests/cache_smoke.py
+      - name: Verify the plan page is served
+        env:
+          TEST_BASE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          set -o pipefail
+          url="${TEST_BASE_URL}plan.html"
+          code=$(curl -sS -L -o /tmp/plan.html -w '%{http_code}' "$url")
+          echo "$url -> $code"
+          test "$code" = "200"
+          grep -q '競走影片 AI 分析規劃書' /tmp/plan.html
+          echo "plan.html is served and carries its title"
       - if: always()
         uses: actions/upload-artifact@v4
         with:
