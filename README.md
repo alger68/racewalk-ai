@@ -35,6 +35,31 @@ ground truth: compliant 30 ms flights produce no provable marking at 240/120/60/
 and 120 ms flights are provable at all four. Low frame rates lose sensitivity as missed
 detections, not false ones. None of this is measured accuracy on real video.
 
+## Knee angle
+
+TR54 constrains the knee only from initial contact until the leg passes the vertical
+upright position. Bending the knee during swing is normal gait, so a minimum taken over
+the whole clip is not a quantity the rule speaks about. `supportKnee` in `site/core.js`
+restricts the minimum to that window, per contact, per foot, and the report surfaces it
+as the headline figure.
+
+Where the hip never passes over the ankle during a contact — the athlete leaves frame
+before mid-stance — that phase falls back to the full contact interval and is counted
+separately as `partialSupportPhases`, so a wider-than-specified window is visible rather
+than silent. The whole-clip minimum is kept in the report as `minLeftKneeWholeClip` /
+`minRightKneeWholeClip` for diagnosis, labelled as not being the rule's criterion.
+Report schema is now 4.
+
+Off-sagittal camera placement biases measured knee angles low. The magnitude of that
+bias is not calibrated.
+
+## Documentation
+
+`docs/RULES.md` maps each TR54 clause to the quantity the code computes, and states what
+judges can do that this system cannot. `docs/CAPTURE_GUIDE.md` gives capture specs and a
+field checklist. Both predate the 3.0 rebuild and were restored with their references
+updated; they describe the sport and the capture problem, which the rebuild did not change.
+
 ## Build
 
 ```sh

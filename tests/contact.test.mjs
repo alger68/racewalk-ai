@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {contactStates,flightIntervals,lowpass,residualNoise,fillGaps,footHeights,MIN_SWING_MS} from '../site/core.js';
+import {contactStates,flightIntervals,lowpass,residualNoise,fillGaps,footHeights,
+        supportKnee,verticalSupportIndex,runsOf,angleDeg,MIN_SWING_MS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
 
@@ -155,6 +156,83 @@ check('單腳最低點取三個足部關鍵點的最大 y',()=>{
 check('足部關鍵點不足兩個時標為不可信',()=>{
   const f=mkFrame(0,.9,.9);for(const i of [27,29])f.landmarks[i].visibility=0;
   assert.equal(footHeights([f],'L').valid[0],false);
+});
+
+// -------------------------------------------- 支撐期膝角（TR54 彎膝規則）
+//
+// 規則規範的是「前導腳自觸地起到通過身體垂直位置為止」。擺動期把膝蓋彎到
+// 90 度是正常動作——取整段最小值會把它算進去，得到與規則無關的數字。
+
+// 左腿可控的合成畫面：右腳固定踩地，只操作左腿。
+// 髖在畫面中前進、觸地期間踝固定，因此髖會在支撐期通過踝的正上方。
+//
+// 膝蓋放在髖—踝連線的中點上，bend 是垂直於該連線推開的量。這樣 bend=0
+// 就是真正的直腿（180°），與髖的前後位置無關——把膝蓋固定在踝的正上方
+// 反而會讓髖前傾時算出 143°，那是模型的錯，不是偵測器的。
+function legFrames({fps=30,durMs=2000,contacts=[[0,600],[1000,1600]],ankleXs=[.35,.65],
+                    ground=.9,liftTo=.75,swingBend=.1,standBend=0}){
+  const dt=1000/fps,out=[];
+  for(let i=0;i*dt<=durMs;i++){
+    const t=i*dt,hipX=.2+.6*(t/durMs);
+    const idx=contacts.findIndex(([a,b])=>a<=t&&t<=b),planted=idx>=0;
+    const ankleX=planted?ankleXs[idx]:.5;
+    const footY=planted?ground:liftTo,bend=planted?standBend:swingBend;
+    const hip={x:hipX,y:footY-.4},ankle={x:ankleX,y:footY};
+    const knee={x:(hip.x+ankle.x)/2+bend,y:(hip.y+ankle.y)/2};
+    const lm=Array.from({length:33},()=>({x:.5,y:.4,visibility:1}));
+    lm[23]={...hip,visibility:1};
+    lm[25]={...knee,visibility:1};
+    for(const j of [27,29,31])lm[j]={...ankle,visibility:1};
+    lm[24]={x:hipX,y:ground-.4,visibility:1};                 // 右腿固定踩地
+    lm[26]={x:.5,y:ground-.2,visibility:1};
+    for(const j of [28,30,32])lm[j]={x:.5,y:ground,visibility:1};
+    out.push({t:t/1000,landmarks:lm});
+  }
+  return out;
+}
+
+check('支撐期伸直、擺動期彎膝 → 只有擺動期的值被排除',()=>{
+  const f=legFrames({}),k=supportKnee(f,.9,30);
+  assert.equal(k.left.length,2,'應該偵測到兩次觸地');
+  for(const c of k.left)assert.ok(c.minAngle>175,`支撐期應接近伸直，得到 ${c.minAngle.toFixed(1)}°`);
+
+  // 同一段畫面取整段最小值會抓到擺動期的彎膝——這正是修正前的行為
+  const whole=Math.min(...f.map(x=>angleDeg(x.landmarks[23],x.landmarks[25],x.landmarks[27]))
+                        .filter(Number.isFinite));
+  assert.ok(whole<140,`整段最小值應該被擺動期拉低，得到 ${whole.toFixed(1)}°`);
+  assert.ok(k.minLeft-whole>35,'支撐期最小值必須明顯高於整段最小值');
+});
+
+check('支撐期真的彎膝時會被抓到',()=>{
+  const k=supportKnee(legFrames({standBend:.1}),.9,30);
+  assert.ok(k.minLeft!=null&&k.minLeft<160,`應偵測到支撐期彎膝，得到 ${k.minLeft}`);
+});
+
+check('髖通過踝正上方的影格被找到',()=>{
+  const f=legFrames({}),idx=verticalSupportIndex(f,'L',0,20);
+  assert.ok(idx!=null&&idx>0);
+  const before=f[idx].landmarks[23].x-f[idx].landmarks[27].x;
+  const after=f[idx+1].landmarks[23].x-f[idx+1].landmarks[27].x;
+  assert.ok(before===0||before*after<0,'該影格前後應有變號');
+});
+
+check('髖未通過踝時標記 partial，不假裝涵蓋完整區間',()=>{
+  // 髖始終在踝左側 → 選手還沒走到中線就出框
+  const f=legFrames({}).map(fr=>({...fr,landmarks:fr.landmarks.map((p,i)=>i===23?{...p,x:.05}:p)}));
+  const k=supportKnee(f,.9,30);
+  assert.ok(k.left.length>0);
+  assert.ok(k.left.every(c=>c.partial===true&&c.supportIndex===null));
+});
+
+check('沒有觸地就沒有支撐期膝角',()=>{
+  const f=legFrames({contacts:[],ankleXs:[.5]});
+  const k=supportKnee(f,.9,30);
+  assert.equal(k.minLeft,null);
+});
+
+check('runsOf 切出連續區段',()=>{
+  assert.deepEqual(runsOf(['a','a','b','a'],'a'),[{start:0,end:1},{start:3,end:3}]);
+  assert.deepEqual(runsOf([],'a'),[]);
 });
 
 console.log(JSON.stringify({suite:'contact',cases,passed:true,

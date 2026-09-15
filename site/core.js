@@ -288,6 +288,79 @@ export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
   return out;
 }
 
+// TR54 的彎膝規則規範的是「前導腳自觸地起，到通過身體垂直位置為止」這段
+// 支撐期——擺動期把膝蓋彎到 90° 是正常動作。取整段影片的最小膝角會混進
+// 擺動期的值，得到一個和規則無關的數字。以下把區間限制回規則真正規範的範圍。
+
+// 把逐格狀態切成連續的 run。
+export function runsOf(states, kind) {
+  const out = [];
+  let i = 0;
+  while (i < states.length) {
+    if (states[i] !== kind) { i++; continue; }
+    const start = i;
+    while (i < states.length && states[i] === kind) i++;
+    out.push({ start, end: i - 1 });
+  }
+  return out;
+}
+
+// 髖關節通過踝關節正上方的影格（垂直支撐位置），以 hip.x - ankle.x 的變號點判定。
+// 用變號而非固定方向，所以左右兩個行進方向都適用。
+export function verticalSupportIndex(frames, side, startIdx, endIdx) {
+  const hipId = side === 'L' ? 23 : 24, ankleId = side === 'L' ? 27 : 28;
+  const at = i => {
+    const h = frames[i]?.landmarks?.[hipId], a = frames[i]?.landmarks?.[ankleId];
+    return h && a && Number.isFinite(h.x) && Number.isFinite(a.x) ? h.x - a.x : null;
+  };
+  for (let i = Math.max(0, startIdx); i < Math.min(endIdx, frames.length - 1); i++) {
+    const cur = at(i), nxt = at(i + 1);
+    if (cur == null || nxt == null) continue;
+    if (cur === 0 || cur * nxt < 0) return i;
+  }
+  return null;
+}
+
+// 每一次觸地的支撐期最小膝角。
+//
+// 回傳的 supportIndex 為 null 代表整段觸地期間髖都沒有通過踝的正上方——
+// 通常是選手還沒走到鏡頭中線就出框。此時退回用整段觸地期，並標記 partial，
+// 讓判讀者知道這個值涵蓋的範圍比規則規定的大。
+export function supportKnee(frames, groundY, fps, threshold = 0.018) {
+  const out = { left: [], right: [], minLeft: null, minRight: null };
+  if (!frames?.length || groundY == null) return out;
+
+  for (const side of ['L', 'R']) {
+    const states = contactStates(frames, side, groundY, fps, threshold);
+    const hipId = side === 'L' ? 23 : 24, kneeId = side === 'L' ? 25 : 26,
+          ankleId = side === 'L' ? 27 : 28;
+
+    for (const { start, end } of runsOf(states, 'contact')) {
+      const support = verticalSupportIndex(frames, side, start, end);
+      const stop = support ?? end;
+      const angles = [];
+      for (let i = start; i <= stop; i++) {
+        const lm = frames[i]?.landmarks;
+        const a = lm && angleDeg(lm[hipId], lm[kneeId], lm[ankleId]);
+        if (Number.isFinite(a)) angles.push(a);
+      }
+      if (!angles.length) continue;
+      (side === 'L' ? out.left : out.right).push({
+        startIndex: start, endIndex: end,
+        supportIndex: support,
+        partial: support == null,
+        startTime: frames[start].t, endTime: frames[stop].t,
+        minAngle: Math.min(...angles),
+      });
+    }
+  }
+
+  const lowest = list => list.length ? Math.min(...list.map(c => c.minAngle)) : null;
+  out.minLeft = lowest(out.left);
+  out.minRight = lowest(out.right);
+  return out;
+}
+
 export function computeFrameMetrics(frame, opts = {}) {
   const lm = frame?.landmarks;
   if (!lm) return { leftKnee: null, rightKnee: null };
