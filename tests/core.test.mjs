@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { angleDeg, angleWithUncertainty, chooseTarget, bboxFromLandmarks, flightIntervals, runMonkeyCore } from '../site/core.js';
+const a={x:0,y:0},b={x:1,y:0},c={x:1,y:1};
+assert.ok(Math.abs(angleDeg(a,b,c)-90)<1e-9);
+const u=angleWithUncertainty(a,b,c,2,1920,1080,64,42);assert.ok(u.low<=u.value&&u.value<=u.high);
+const person=(cx)=>Array.from({length:33},(_,i)=>({x:cx+(i%2)*.01,y:.3+(i%5)*.02,visibility:1}));
+assert.equal(chooseTarget([person(.2),person(.7)],null,{x:.72,y:.35}),1);
+assert.ok(bboxFromLandmarks(person(.4)).area>0);
+const footFrame=(t,y)=>({t,landmarks:Array.from({length:33},()=>({x:.5,y:.5,visibility:1})).map((p,i)=>[27,28,29,30,31,32].includes(i)?{...p,y}:p)});
+const fl=flightIntervals([footFrame(0,.9),footFrame(.033,.8),footFrame(.066,.8),footFrame(.099,.9)],.9,30,.02);assert.equal(fl.length,1);assert.equal(fl[0].frames,2);
+assert.equal(runMonkeyCore(200).passed,200);
+console.log('core tests: PASS');

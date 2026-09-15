@@ -1,6 +1,0 @@
-{
-  "name": "racewalk-ai-web",
-  "private": true,
-  "type": "module",
-  "description": "網頁版分析工具的核心演算法。type: module 讓 Node 直接把 web/racewalk-core.js 當 ES module 載入，移植驗證才不會噴警告。"
-}

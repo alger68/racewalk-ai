@@ -1,20 +1,4 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-build/
-dist/
-.venv/
-venv/
-
-# 影片與衍生資料一律不進版控：檔案大，且含選手肖像
-data/
-*.mp4
-*.mov
-*.avi
-*.parquet
-outputs/
-
-# 由 tools/dump-fixtures.py 產生，CI 會重新生成
-tools/port-fixtures.json
+node_modules/
+.DS_Store
+*.log
+coverage/
