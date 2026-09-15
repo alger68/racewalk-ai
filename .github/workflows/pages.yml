@@ -53,6 +53,8 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -62,3 +64,31 @@ jobs:
       - name: Deploy tested artifact to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+  verify-live:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install browsers and fixture encoder
+        run: |
+          python -m pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+          command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+      - name: Real inference against the published site
+        env:
+          TEST_BASE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: python tests/browser_smoke.py
+      - name: Save live-site evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-browser-evidence
+          path: |
+            test-results/*.json
+            test-results/*.png
+          if-no-files-found: warn
+          retention-days: 14
