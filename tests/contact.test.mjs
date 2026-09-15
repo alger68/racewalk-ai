@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {contactStates,flightIntervals,lowpass,residualNoise,fillGaps,footHeights,
-        supportKnee,verticalSupportIndex,runsOf,angleDeg,MIN_SWING_MS} from '../site/core.js';
+        supportKnee,verticalSupportIndex,runsOf,angleDeg,MIN_SWING_MS,
+        judgeDetection,DETECTION_BANDS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
 
@@ -233,6 +234,48 @@ check('沒有觸地就沒有支撐期膝角',()=>{
 check('runsOf 切出連續區段',()=>{
   assert.deepEqual(runsOf(['a','a','b','a'],'a'),[{start:0,end:1},{start:3,end:3}]);
   assert.deepEqual(runsOf([],'a'),[]);
+});
+
+check('偵測分帶只落在文獻撐得起的三帶上',()=>{
+  const band=ms=>judgeDetection(ms).band;
+  // 錨點一：未見裁判察覺 40 ms 以下騰空的已發表報告
+  assert.equal(band(0),'below-reported');
+  assert.equal(band(20),'below-reported');   // 菁英選手的常態
+  assert.equal(band(39.9),'below-reported');
+  // 錨點二：40–45 ms，8 位國際裁判中 3 位察覺
+  assert.equal(band(40),'at-threshold');
+  assert.equal(band(44.9),'at-threshold');
+  // 研究指出低於約 45 ms 無法察覺屬人類視覺系統的正常表現
+  assert.equal(band(45),'above-threshold');
+  assert.equal(band(120),'above-threshold');
+});
+
+check('每一帶都附得出出處，不是裸門檻',()=>{
+  for(const ms of [10,42,200]){
+    const d=judgeDetection(ms);
+    assert.ok(d.evidence.length>0,'分帶必須帶證據敘述');
+    assert.ok(d.source.includes('docs/RULES.md'),'必須指得回出處文件');
+    assert.equal(d.flightMs,ms);
+  }
+  assert.equal(DETECTION_BANDS.length,3,'文獻只撐得起三帶；加帶前要先有新出處');
+});
+
+check('非有限輸入不給分帶，而不是猜一個',()=>{
+  for(const v of [null,undefined,NaN,Infinity]) assert.equal(judgeDetection(v),null);
+});
+
+check('分帶吃 lowerMs，所以只會低估不會高估',()=>{
+  // 真實騰空 100 ms，取樣界線給的 lowerMs 一定 <= 100；
+  // 分帶單調不減，所以用 lowerMs 得到的帶不會高於用真值得到的帶。
+  const order=DETECTION_BANDS.map(b=>b.band);
+  const rank=ms=>order.indexOf(judgeDetection(ms).band);
+  const g=gait({fps:240,flightMs:100}),f=flightIntervals(g.frames,g.ground,240);
+  assert.ok(f.length>0);
+  for(const iv of f){
+    assert.ok(iv.lowerMs<=100+1e-9,'下界不得超過真值');
+    assert.ok(rank(iv.lowerMs)<=rank(100),'用下界分帶不得比用真值更嚴');
+    assert.equal(iv.detection.band,judgeDetection(iv.lowerMs).band);
+  }
 });
 
 console.log(JSON.stringify({suite:'contact',cases,passed:true,

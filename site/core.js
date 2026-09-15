@@ -241,6 +241,41 @@ export function footContact(landmarks, side, groundY, threshold = 0.018) {
   return gap <= threshold && gap >= -threshold * 1.4 ? 'contact' : 'off';
 }
 
+// 裁判可見性：把騰空時間對應到「文獻報告過什麼」，而不是一個門檻。
+//
+// TR54 判的是「肉眼可見」的騰空，所以問題不是「超過幾毫秒」，而是「這麼長的
+// 騰空，裁判看得見嗎」。而那是一條機率曲線，不是階梯。
+//
+// 但已發表的量化資料很少。可靠的只有兩個錨點：40 ms 以下沒有偵測報告，
+// 以及 40–45 ms 區間「8 位國際裁判中 3 位察覺」。用這兩點去擬一條連續曲線，
+// 中間的數值全是捏造的——看起來精確，實際沒有依據，比階梯門檻更糟。
+//
+// 因此這裡只輸出文獻撐得起的分帶，每一帶都附得出出處，並明確標示樣本大小。
+// 這不是本工具的校準結果，也不是判定；要當成判準之前必須自行對照裁判紅卡。
+export const DETECTION_BANDS = [
+  { max: 40, band: 'below-reported',
+    label: '低於文獻報告的偵測範圍',
+    evidence: '未見裁判察覺此長度騰空的已發表報告' },
+  { max: 45, band: 'at-threshold',
+    label: '落在文獻報告的偵測門檻區間',
+    evidence: '一項研究中 8 位國際裁判有 3 位察覺 40–45 ms 的騰空' },
+  { max: Infinity, band: 'above-threshold',
+    label: '高於文獻描述「無法察覺屬正常」的範圍',
+    evidence: '該研究指出低於約 45 ms 無法察覺屬人類視覺系統的正常表現' },
+];
+
+export const DETECTION_SOURCE =
+  'Assessment of IAAF Racewalk Judges\' Ability to Detect Legal and Non-legal Technique; ' +
+  '經二手摘要取得，引用前請核對原文。詳見 docs/RULES.md。';
+
+// 套用在 lowerMs（嚴謹下界）而非觀察值，所以結論偏保守：
+// 真實騰空只會更長，落到更高的分帶，不會更低。
+export function judgeDetection(flightMs) {
+  if (!Number.isFinite(flightMs)) return null;
+  const hit = DETECTION_BANDS.find(b => flightMs < b.max) ?? DETECTION_BANDS[DETECTION_BANDS.length - 1];
+  return { ...hit, flightMs, source: DETECTION_SOURCE };
+}
+
 // 雙腳皆離地的區間，附取樣界線。
 //
 // lowerMs = (k-1)·Δ 是嚴謹的下界：觀察到連續 k 格雙腳離地、取樣間隔 Δ，
@@ -283,6 +318,7 @@ export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
       lowerMs: Math.max(0, (k - 1) * dt),  // 嚴謹下界
       upperMs: (k + 1) * dt,               // 估計值，非嚴謹上界（見上方說明）
       bounded: true,
+      detection: judgeDetection(Math.max(0, (k - 1) * dt)),
     });
   }
   return out;

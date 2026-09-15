@@ -35,6 +35,26 @@ ground truth: compliant 30 ms flights produce no provable marking at 240/120/60/
 and 120 ms flights are provable at all four. Low frame rates lose sensitivity as missed
 detections, not false ones. None of this is measured accuracy on real video.
 
+## Judge-detection bands
+
+TR54 prohibits flight that is *visible to the human eye*, not flight as such —
+elite flight times sit at 20–40 ms, so a true/false airborne detector flags
+every legal athlete. `judgeDetection` in `site/core.js` therefore maps a flight
+time onto what the literature reports about judges seeing it, not onto a pass/fail
+threshold.
+
+The published evidence supports two anchors: no reported detection below 40 ms,
+and 3 of 8 international judges detecting flight in the 40–45 ms band, with that
+study describing sub-45 ms non-detection as normal human vision. Those two points
+give three bands. Fitting a sigmoid through two points would invent every number
+in between and look more precise than the evidence is, so the bands stay discrete
+and each carries its own `evidence` string and a `source` pointing at `docs/RULES.md`.
+
+The band is computed from `lowerMs`, the rigorous bound, not from the observed
+run, so it errs low: the real flight can only be longer and land in a higher band.
+Nothing here is calibrated against this tool's own output — no red-card footage
+has been processed.
+
 ## Knee angle
 
 TR54 constrains the knee only from initial contact until the leg passes the vertical
@@ -48,15 +68,19 @@ before mid-stance — that phase falls back to the full contact interval and is 
 separately as `partialSupportPhases`, so a wider-than-specified window is visible rather
 than silent. The whole-clip minimum is kept in the report as `minLeftKneeWholeClip` /
 `minRightKneeWholeClip` for diagnosis, labelled as not being the rule's criterion.
-Report schema is now 4.
+Report schema is now 5.
 
 Off-sagittal camera placement biases measured knee angles low. The magnitude of that
 bias is not calibrated.
 
 ## Documentation
 
-`docs/RULES.md` maps each TR54 clause to the quantity the code computes, and states what
-judges can do that this system cannot. `docs/CAPTURE_GUIDE.md` gives capture specs and a
+`docs/RULES.md` maps each TR54 clause to the quantity the code computes, states what
+judges can do that this system cannot, and lists the international sources — the
+Competition and Technical Rules, C2.1, the judging guide, the TR54.7.8 handheld-device
+amendment and the 2022 ban on shoes containing sensing technology — each marked as
+obtained from secondary search summaries, because `worldathletics.org` and PMC were
+unreachable from this environment. `docs/CAPTURE_GUIDE.md` gives capture specs and a
 field checklist. Both predate the 3.0 rebuild and were restored with their references
 updated; they describe the sport and the capture problem, which the rebuild did not change.
 
