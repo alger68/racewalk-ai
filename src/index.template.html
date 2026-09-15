@@ -25,7 +25,62 @@
 <div class="grid two lower"><article class="card"><div class="viewerHead"><h2>03 角度曲線＋點位誤差帶</h2><div id="angleNow" class="metricInline">L — / R —</div></div><canvas id="chart" height="300"></canvas></article><article class="card"><div class="viewerHead"><h2>04 快速判讀</h2><button id="monkeyBtn">核心隨機測試 1000 次</button></div><div id="quickStats" class="stats"></div><div id="events" class="events"></div><pre id="monkeyResult" class="testResult"></pre></article></div></section>
 <section id="report" class="panel"><article class="card"><div class="viewerHead"><h2>本次報告</h2><div class="actions compact"><button id="exportJson">JSON</button><button id="exportCsv">CSV</button><button id="exportHtml">HTML/列印</button></div></div><div id="reportBody" class="reportBody"><p>完成分析後會產生本次報告。</p></div></article></section>
 <section id="records" class="panel"><article class="card"><div class="viewerHead"><h2>訓練紀錄</h2><button id="clearRecords">清除本機紀錄</button></div><p class="muted">只保存分析摘要與設定，不保存影片內容。</p><div id="recordList"></div></article></section>
-<section id="guide" class="panel"><article class="card prose"><h2>拍攝與指定選手</h2><ul><li>在全身清楚的影格暫停，按「框選指定選手」拖曳框住整位選手。</li><li>點選人物縮圖，核對金色框，再按「確認這位選手」和「開始鎖定分析」。只有一位候選也必須確認。</li><li>更改起始影格須重新指定。失聯、軀幹重疊或配對不明確時會停止取值，保留已取得結果。</li><li>追蹤標籤不是身分保證；相似衣著、遮擋、快速移動仍須回看原片。</li><li>建議每段 10–15 秒。請核對拍攝與取樣幀率，並保持頁面在前景。</li><li>AI 結果只做技術篩查，不輸出正式裁判判決。</li></ul></article></section>
+<section id="guide" class="panel">
+<article class="card prose"><h2>拍攝規格</h2>
+<p class="lead">騰空只有 <strong>20–40 毫秒</strong>，幀率決定這個工具的上限。預算優先順序是<strong>幀率 &gt; 快門 &gt; 解析度</strong>。4K@30fps 對本專案毫無用處。</p>
+<table><thead><tr><th>條件</th><th>建議</th><th>理由</th></tr></thead><tbody>
+<tr><td>幀率</td><td><strong>≥ 240 fps</strong>；120 fps 為下限</td><td>40 ms 的騰空在 240 fps 下約 10 個取樣點；60 fps 只有 2–3 個</td></tr>
+<tr><td>快門</td><td>≥ 1/1000 s，<strong>手動鎖定</strong></td><td>動態模糊會糊掉腳與地面的接觸邊界</td></tr>
+<tr><td>解析度</td><td>1080p 即可</td><td>把預算留給幀率與快門</td></tr>
+<tr><td>機位</td><td>側向，光軸<strong>垂直於行進方向</strong>，高度 0.8–1.0 m，距離 5–8 m</td><td>矢狀面才能正確量膝角</td></tr>
+<tr><td>鏡頭</td><td>等效 50–85 mm，避免廣角</td><td>廣角桶形變形會扭曲角度</td></tr>
+<tr><td>光線</td><td>戶外日光最佳；室內 ≥ 1000 lux</td><td>1/1000 s 快門很吃光</td></tr>
+<tr><td>背景</td><td>乾淨、與服裝對比明顯</td><td>提升足部關鍵點穩定度</td></tr>
+<tr><td>入鏡範圍</td><td>選手全身入鏡，<strong>雙腳不可出框</strong>，至少 4 個完整步態週期</td><td>腳出框就量不到觸地</td></tr>
+</tbody></table>
+<p class="muted">入門方案 NT$0：手機慢動作 240 fps @1080p ＋ 三腳架 ＋ 充足日光，鎖定對焦避免漂移。<strong>建議從這裡開始。</strong></p>
+</article>
+
+<article class="card prose"><h2>分析結果不對勁時，先看這裡</h2>
+<p>下面每一列的左欄都是本工具自己會顯示的數字。這些狀況幾乎都是拍攝條件造成的，不是選手的動作問題——<strong>在連續率上得去之前，不要拿角度判讀選手</strong>。</p>
+<table><thead><tr><th>你看到的</th><th>多半的原因</th><th>怎麼改</th></tr></thead><tbody>
+<tr><td><strong>追蹤連續率偏低</strong>（例如 &lt; 70%）</td><td>選手在畫面裡太小；背景雜亂或同色；曝光不足；選手部分出框</td><td>靠近或拉長焦距讓選手佔畫面高度一半以上；換乾淨背景；補光</td></tr>
+<tr><td><strong>曲線一叢一叢、上下大幅跳動</strong></td><td>關節點不穩，多半同上</td><td>同上。線應該是平滑的，跳動 40° 不是真實膝角</td></tr>
+<tr><td><strong>支撐期最小角明顯偏小</strong>（例如 &lt; 160°）</td><td>機位不是正側面，投影誤差讓角度<strong>系統性偏小</strong></td><td>把光軸調到垂直於行進方向；用地面標記線目視對齊</td></tr>
+<tr><td><strong>圖上大片斜線留白</strong></td><td>那些影格沒有可靠配對，角度是空的</td><td>同追蹤連續率。留白不是「角度正常」</td></tr>
+<tr><td><strong>未標記疑似雙腳離地</strong></td><td>取樣幀率不足，或連續影格太少湊不出可證明的區間</td><td>提高拍攝與分析取樣幀率。低幀率是<strong>漏報</strong>，不代表沒有騰空</td></tr>
+<tr><td><strong>指定選手立刻失聯</strong></td><td>起始影格的骨架本身就不準</td><td>先按「辨識目前畫面人物」，確認縮圖骨架貼得住再開始</td></tr>
+</tbody></table>
+</article>
+
+<article class="card prose"><h2>現場檢查清單</h2>
+<p><strong>拍攝前</strong></p>
+<ul>
+<li>相機確認在高幀率模式（很多機種切到慢動作會自動降解析度）</li>
+<li>快門手動鎖定 1/1000 s 以上，<strong>不要用自動</strong></li>
+<li>對焦鎖定在賽道中線，關閉連續自動對焦</li>
+<li>三腳架水平，光軸垂直於行進方向</li>
+<li>試拍 5 秒，用 <code>ffprobe -show_streams</code> 或播放器資訊確認幀率有寫進檔案。<br>
+<span class="muted">手機慢動作經某些匯出路徑會被轉成「已放慢的 30 fps」，原始取樣資訊就沒了。判斷方法：原始檔播放是正常速度，被轉過的播放起來就是慢動作。</span></li>
+</ul>
+<p><strong>拍攝時</strong></p>
+<ul><li>每位選手至少 4 個完整步態週期</li><li>選手全身入鏡，雙腳不可出框</li><li>同一機位連續拍攝，中途不要變焦或移動</li></ul>
+<p><strong>拍完後</strong></p>
+<ul><li>原始檔直接備份，不要用會重新編碼的方式傳輸（通訊軟體通常會壓縮並降幀）</li><li>記錄選手、日期、配速、場地條件</li></ul>
+<p class="muted"><strong>為什麼要鎖定快門：</strong>自動曝光在雲層飄過時會改變快門速度。快門一變慢，動態模糊變大，足部關鍵點精度跟著變——而系統無法從影片本身察覺這件事，只會默默把誤差變大的結果照常輸出。</p>
+</article>
+
+<article class="card prose"><h2>指定選手的操作</h2>
+<ul>
+<li>在全身清楚的影格暫停，按「框選指定選手」拖曳框住整位選手。</li>
+<li>點選人物縮圖，核對金色框，再按「確認這位選手」和「開始鎖定分析」。只有一位候選也必須確認。</li>
+<li>更改起始影格須重新指定。失聯、軀幹重疊或配對不明確時停止取值，但繼續掃描整段；短暫失聯須連續三格核對才恢復，長時間失聯需重新指定。</li>
+<li>追蹤標籤不是身分保證；相似衣著、遮擋、快速移動仍須回看原片。</li>
+<li>建議每段 10–15 秒。請核對拍攝與取樣幀率，並保持頁面在前景。</li>
+<li>AI 結果只做技術篩查，不輸出正式裁判判決。</li>
+</ul>
+</article>
+</section>
 </main><footer>RaceWalk Lab 3.0.4 · 指定選手確認／不確定時暫停 · ChatGPT rebuild · <a href="./plan.html">規劃書</a></footer>
 <noscript>請啟用 JavaScript 才能使用影片分析。</noscript><script defer src="./autostart.js?v=3.0.4"></script>
 </body></html>

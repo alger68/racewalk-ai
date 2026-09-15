@@ -44,7 +44,7 @@ s=(ROOT/'src/ai-loader.template.js').read_text();a=s.index('async function getMo
 s=s[:a]+(ROOT/'src/model-cache.js').read_text()+s[b:]
 s=s.replace("onStatus('初始化 AI（首次載入請稍候）…');", "onStatus('模型已讀取，正在初始化 WASM／AI（這一步不是模型下載）…');")
 (site/'ai-loader.js').write_text(s)
-s=(ROOT/'src/index.template.html').read_text().replace('3.0.4','3.0.5').replace('失聯、軀幹重疊或配對不明確時會停止取值，保留已取得結果。','失聯、軀幹重疊或配對不明確時停止取值，但繼續掃描整段；短暫失聯須連續三格核對才恢復，長時間失聯需重新指定。').replace('不確定時暫停','不確定留白／繼續掃描')
+s=(ROOT/'src/index.template.html').read_text().replace('3.0.4','3.0.5').replace('不確定時暫停','不確定留白／繼續掃描')
 (site/'index.html').write_text(s)
 # Preserve all former UI regressions, adapting only the intentionally changed
 # missing-detection behavior. Real inference, ROI and target-coordinate assertions remain.
