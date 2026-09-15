@@ -77,9 +77,8 @@ bias is not calibrated.
 
 `docs/PLAN.md` is the current plan: what the tool is now, what is blocked on real
 footage, and which parts of the original Python-pipeline design the implementation
-overturned. `docs/plan.html` is the same content as a standalone page — open it
-directly in a browser; it is not part of the Pages deployment, which publishes
-`site/` only. `docs/RULES.md` maps each TR54 clause to the quantity the code computes, states what
+overturned. `site/plan.html` is the same content as a standalone page,
+deployed with the site and linked from the tool's footer. `docs/RULES.md` maps each TR54 clause to the quantity the code computes, states what
 judges can do that this system cannot, and lists the international sources — the
 Competition and Technical Rules, C2.1, the judging guide, the TR54.7.8 handheld-device
 amendment and the 2022 ban on shoes containing sensing technology — each marked as
