@@ -1,0 +1,44 @@
+name: Read-only runtime and numerical audit
+on:
+  push:
+    branches: [audit/runtime-305-20260916]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build identical frontend, no deployment
+        run: |
+          mkdir -p audit-results
+          python scripts/build_controller.py
+          for file in site/*.js; do node --check "$file"; done
+      - name: Existing regression suites
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          for file in tests/*.test.mjs; do echo "SUITE $file"; node "$file"; done 2>&1 | tee audit-results/regressions.txt
+      - name: Independent numerical and tracker edge cases
+        run: node tests/independent-audit.mjs
+      - name: Install browsers
+        run: |
+          pip install playwright==1.57.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Cold and warm start, controlled bandwidth, failure recovery
+        run: python tests/runtime_audit.py
+      - name: Retain audit evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-audit-evidence
+          path: audit-results/
+          retention-days: 14
