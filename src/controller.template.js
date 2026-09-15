@@ -335,9 +335,19 @@ function renderDiagnosis(){
  if(!findings.length){box.innerHTML='';return;}
  box.innerHTML=`<h3>這份結果可信嗎</h3>${findings.map(f=>
   `<div class="finding ${f.level}"><div class="findingHead"><span class="tag">${LEVEL_TEXT[f.level]}</span><strong>${escapeHtml(f.title)}</strong></div>`+
-  `<p>${escapeHtml(f.cause)}</p><p class="action">${escapeHtml(f.action)}</p></div>`).join('')}`+
+  `<p>${escapeHtml(f.cause)}</p><p class="action">${escapeHtml(f.action)}</p>`+
+  // 指得出現場的就給一個跳過去的按鈕；指不出來的（例如整段的取樣設定）誠實說明白。
+  (f.at==null?'<p class="noseek">整段設定，沒有特定影格</p>'
+             :`<button type="button" class="seekFinding" data-goto="${f.at}">跳到 ${formatTime(f.at)} 看這一格</button>`)+
+  '</div>').join('')}`+
   '<p class="muted">上列門檻是拍攝條件的合理性檢查，不是 TR54 判準，也未經實拍校準。<button type="button" class="linklike" id="toGuide">開啟拍攝指南</button></p>';
  const go=$('toGuide');if(go)go.onclick=()=>document.querySelector('.tab[data-tab="guide"]')?.click();
+ box.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{
+  if(state.analyzing)return;
+  video.currentTime=+b.dataset.goto;
+  document.querySelector('.tab[data-tab="analyze"]')?.click();
+  $('stage')?.scrollIntoView({block:'center',behavior:'smooth'});
+ });
 }
 function renderReport(){if(!state.report){$('reportBody').innerHTML='<p>完成分析後會產生本次報告。</p>';return;}const r=state.report,s=r.summary;$('reportBody').innerHTML=`<h3>${escapeHtml(r.settings.athlete)} · ${r.settings.date}</h3><p><strong>指定選手：${escapeHtml(r.targetSelection?.id||'未記錄')}</strong> ｜ 起始影格 ${formatTime(r.targetSelection?.time)} ｜ ${r.trackingStop?'追蹤不確定，已暫停；不是完整分析':'使用者已確認目標'}。追蹤標籤不是身分保證，請核對原片。</p><p>引擎：${r.engine} ｜ 取樣 ${r.settings.sampleFps} fps ｜ 誤差模擬 ${r.settings.uncertaintyEnabled?`開啟（σ=${r.settings.pointSigmaPx}px）`:'關閉'}</p><table><tr><th>指標</th><th>結果</th></tr><tr><td>追蹤連續率</td><td>${(s.continuity*100).toFixed(1)}%</td></tr><tr><td>最多同框人物</td><td>${s.maxPeople}</td></tr><tr><td>左膝支撐期最小角</td><td>${num(s.minLeftKneeSupport)}°</td></tr><tr><td>右膝支撐期最小角</td><td>${num(s.minRightKneeSupport)}°</td></tr><tr><td>支撐期數（其中未涵蓋垂直位置）</td><td>${s.supportPhases}（${s.partialSupportPhases}）</td></tr><tr><td>整段最小膝角（含擺動期，非 TR54 判準）</td><td>${num(s.minLeftKneeWholeClip)}° / ${num(s.minRightKneeWholeClip)}°</td></tr><tr><td>疑似雙腳離地區間</td><td>${s.flightIntervals}</td></tr><tr><td>依文獻偵測分帶（依 lowerMs）</td><td>${DETECTION_BANDS.map(b=>`${b.label}：${s.detectionBands?.[b.band]??0}`).join('｜')}</td></tr><tr><td>人工修正點數</td><td>${s.manualCorrections}</td></tr></table><p class="muted">支撐期最小角只取「觸地到通過垂直位置」這段，也就是 TR54 彎膝規則規範的範圍；擺動期彎膝屬正常動作，不列入。若該次觸地期間髖未通過踝的正上方（選手提前出框），該次退回用整段觸地期並計入括號內的數量，涵蓋範圍比規則規定的大。非矢狀面拍攝會讓量到的角度偏小。AI 僅提供篩查與複查證據，不輸出正式犯規判決。</p><p class="muted">偵測分帶不是判定，是「這種長度的騰空，文獻說裁判看不看得見」。分帶只編碼兩個文獻錨點，中間不插值；且套用在嚴謹下界 lowerMs 上，所以偏保守。本工具尚未對照裁判紅卡校準。出處：${escapeHtml(DETECTION_SOURCE)}</p>`;}
 $('monkeyBtn').onclick=()=>{try{const r=runMonkeyCore(1000);$('monkeyResult').textContent=`PASS\n${r.passed}/${r.iterations} invariants passed\nangle range / uncertainty containment OK\n此為核心隨機測試，不是影片準確度驗證。`;}catch(e){$('monkeyResult').textContent='FAIL\n'+e.stack;}};

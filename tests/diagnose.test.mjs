@@ -133,5 +133,30 @@ check('下界為 0 的觀測被單獨點名，不混進可證明的區間',()=>{
   assert.ok(f.cause.includes('下界是 0')&&f.cause.includes('不構成證據'));
 });
 
+check('指得出現場的發現都帶時間，指不出的誠實留空',()=>{
+  const frames=Array.from({length:40},(_,i)=>({t:i/30,landmarks:i<20?[{}]:null,
+    metrics:{leftKnee:{value:i%2?175:115},rightKnee:{value:150}}}));
+  const r=ok({settings:{sampleFps:30},summary:{continuity:.5,minLeftKneeSupport:120}});
+  r.frames=frames;
+  r.flights=[{lowerMs:0,startTime:2.1,endTime:2.1},{lowerMs:367,startTime:5.767,endTime:6.133}];
+  r.supportKnee={left:[{minAngle:120,startTime:1.5},{minAngle:170,startTime:3}],right:[]};
+  const by=t=>diagnoseCapture(r).find(f=>f.title.includes(t));
+
+  assert.equal(by('不足以篩查騰空').at,null,'取樣率是整段設定，不該假裝指得出某一格');
+  assert.equal(by('疑似騰空長達').at,5.767,'應指向最長的那一段');
+  assert.equal(by('無法證明').at,2.1);
+  assert.equal(by('支撐期最小角').at,1.5,'應指向最小角所在的那一段，不是第一段');
+  assert.ok(by('追蹤連續率').at>=20/30,'應指向最長的留白起點');
+  assert.ok(by('逐格跳動').at!=null);
+
+  for(const f of diagnoseCapture(r))
+    assert.ok(f.at===null||Number.isFinite(f.at),`at 必須是秒數或 null，得到 ${f.at}`);
+});
+
+check('沒有影格資料時不會硬編一個時間出來',()=>{
+  const f=diagnoseCapture(ok({settings:{sampleFps:30},summary:{continuity:.2}}));
+  for(const x of f) assert.ok(x.at===null||Number.isFinite(x.at));
+});
+
 console.log(JSON.stringify({suite:'diagnose',cases,passed:true,
   scope:'capture-plausibility rules over report summaries; thresholds are not TR54 criteria and are not calibrated against real footage'}));

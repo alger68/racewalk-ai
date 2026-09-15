@@ -100,7 +100,10 @@ median frame-to-frame rate exceeds any real gait (reported as jitter, most likel
 left/right legs swapping under a side view, not as technique), and a flight interval
 longer than any credible one (reported as feet lost from the frame, not as flight).
 An interval whose rigorous lower bound is zero proves nothing and is listed separately
-from the provable ones rather than beside them. None of the thresholds is
+from the provable ones rather than beside them. Each finding that can be located
+carries the time it happens at — the worst jitter frame, the longest blank, the support
+phase holding the smallest angle — and the panel offers a button that seeks the video
+there; a finding about a whole-clip setting says so instead of inventing a frame. None of the thresholds is
 calibrated against real footage. `node tests/diagnose.test.mjs` covers the wording as
 well as the branching, including that an early loss of tracking is only attributed to a
 bad seed skeleton when continuity is also low.

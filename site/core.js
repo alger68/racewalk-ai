@@ -452,34 +452,70 @@ export function kneeChangeRate(frames, key, fps) {
   return percentile(steps, 0.5) * fps;
 }
 
+// 每筆發現盡量附上「去哪裡看」的時間。講得出問題卻指不出現場，
+// 使用者只能自己在時間軸上猜。
+export function worstJitterTime(frames, key) {
+  let worst = -1, at = null;
+  for (let i = 1; i < (frames?.length || 0); i++) {
+    const a = frames[i - 1]?.metrics?.[key]?.value, b = frames[i]?.metrics?.[key]?.value;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    const d = Math.abs(b - a);
+    if (d > worst) { worst = d; at = frames[i].t; }
+  }
+  return at;
+}
+
+export function longestGapTime(frames) {
+  let best = 0, at = null, run = 0, start = null;
+  for (const f of frames || []) {
+    if (f.landmarks) { run = 0; start = null; continue; }
+    if (start == null) start = f.t;
+    run++;
+    if (run > best) { best = run; at = start; }
+  }
+  return at;
+}
+
+function worstSupportPhaseTime(report) {
+  const all = [...(report.supportKnee?.left || []), ...(report.supportKnee?.right || [])]
+    .filter(c => Number.isFinite(c.minAngle));
+  if (!all.length) return null;
+  return all.sort((a, b) => a.minAngle - b.minAngle)[0].startTime;
+}
+
 export function diagnoseCapture(report) {
   const s = report?.summary;
   if (!s) return [];
   const set = report.settings || {}, out = [];
-  const add = (level, title, cause, action) => out.push({level, title, cause, action});
+  const add = (level, title, cause, action, at) =>
+    out.push({level, title, cause, action, at: Number.isFinite(at) ? at : null});
 
   const sampleFps = Number(set.sampleFps);
   if (Number.isFinite(sampleFps) && sampleFps < MIN_SCREENING_FPS)
     add('blocker', `分析取樣 ${sampleFps} fps，不足以篩查騰空`,
         `40 ms 的騰空在 ${sampleFps} fps 下只有 ${Math.max(1, Math.round(40 / (1000 / sampleFps)))} 個取樣點，短騰空會直接漏掉。`,
         '提高分析取樣 fps；若原始影片本身低於 120 fps，需重拍。膝角仍可參考。');
+        // 取樣率是整段的設定，沒有特定時間點可跳。
 
   const c = Number(s.continuity);
   if (Number.isFinite(c) && c < VERY_LOW_CONTINUITY)
     add('blocker', `追蹤連續率 ${(c * 100).toFixed(1)}%`,
         '多數影格沒有可靠配對，角度是空的；圖上的斜線留白就是這些影格。',
-        '選手在畫面裡太小、背景雜亂或同色、曝光不足。靠近或拉長焦距，讓選手佔畫面高度一半以上。');
+        '選手在畫面裡太小、背景雜亂或同色、曝光不足。靠近或拉長焦距，讓選手佔畫面高度一半以上。',
+        longestGapTime(report.frames));
   else if (Number.isFinite(c) && c < LOW_CONTINUITY)
     add('warn', `追蹤連續率 ${(c * 100).toFixed(1)}%`,
         '可用影格偏少，趨勢容易被少數幾格帶偏。',
-        '同上：放大選手在畫面中的比例，並確認背景與服裝有對比。');
+        '同上：放大選手在畫面中的比例，並確認背景與服裝有對比。',
+        longestGapTime(report.frames));
 
   const knees = [['左', s.minLeftKneeSupport], ['右', s.minRightKneeSupport]]
     .filter(([, v]) => Number.isFinite(v) && v < IMPLAUSIBLE_SUPPORT_KNEE);
   if (knees.length)
     add('warn', `支撐期最小角偏小（${knees.map(([k, v]) => `${k} ${v.toFixed(1)}°`).join('、')}）`,
         '合格競走選手支撐期的膝角接近伸直。量到這個值，最可能是機位不是正側面——離面角度會讓量到的膝角系統性偏小。',
-        '把光軸調到垂直於行進方向。在確認機位之前，不要拿這個數字判讀選手。');
+        '把光軸調到垂直於行進方向。在確認機位之前，不要拿這個數字判讀選手。',
+        worstSupportPhaseTime(report));
 
   if (s.supportPhases === 0)
     add('blocker', '沒有偵測到任何支撐期',
@@ -488,7 +524,9 @@ export function diagnoseCapture(report) {
   else if (s.partialSupportPhases > 0)
     add('info', `${s.partialSupportPhases} 段支撐期未涵蓋垂直位置`,
         '這些段落的髖沒有通過踝的正上方（多半是選手提前出框），取值範圍比規則規定的大。',
-        '讓選手在畫面中多停留一個完整步態週期再出框。');
+        '讓選手在畫面中多停留一個完整步態週期再出框。',
+        [...(report.supportKnee?.left || []), ...(report.supportKnee?.right || [])]
+          .find(c => c.partial)?.startTime);
 
   if (s.flightIntervals === 0)
     add('info', '未標記疑似雙腳離地',
@@ -497,31 +535,36 @@ export function diagnoseCapture(report) {
 
   const fps = Number(set.sampleFps);
   const rates = [['左', 'leftKnee'], ['右', 'rightKnee']]
-    .map(([side, key]) => [side, kneeChangeRate(report.frames, key, fps)])
-    .filter(([, r]) => Number.isFinite(r) && r > MAX_PLAUSIBLE_KNEE_RATE);
+    .map(([side, key]) => ({side, key, rate: kneeChangeRate(report.frames, key, fps)}))
+    .filter(r => Number.isFinite(r.rate) && r.rate > MAX_PLAUSIBLE_KNEE_RATE)
+    .sort((a, b) => b.rate - a.rate);
   if (rates.length)
-    add('blocker', `膝角逐格跳動過大（${rates.map(([k, r]) => `${k} ${Math.round(r)}°/秒`).join('、')}）`,
+    add('blocker', `膝角逐格跳動過大（${rates.map(r => `${r.side} ${Math.round(r.rate)}°/秒`).join('、')}）`,
         `真實步態的膝角尖峰角速度約 ${MAX_PLAUSIBLE_KNEE_RATE}°/秒，而且一步只擺盪一次。中位數就超過這個量級，代表曲線在逐格跳動——側面視角下左右腳被交換是最常見的原因，關節點不穩也會。`,
-        '這種曲線的最小角不能拿來判讀。提高選手在畫面中的比例與對比，讓兩腳可以被分開。');
+        '這種曲線的最小角不能拿來判讀。提高選手在畫面中的比例與對比，讓兩腳可以被分開。',
+        worstJitterTime(report.frames, rates[0].key));
 
   const wild = (report.flights || []).filter(f => Number(f.lowerMs) > MAX_PLAUSIBLE_FLIGHT_MS);
   if (wild.length)
     add('blocker', `${wild.length} 段疑似騰空長達 ${Math.round(Math.max(...wild.map(f => f.lowerMs)))} ms`,
         `競走的騰空是 20–40 ms 等級，短跑也只有約 120 ms。超過 ${MAX_PLAUSIBLE_FLIGHT_MS} ms 不是騰空，是足部關鍵點在那段時間遺失。`,
-        '確認選手雙腳全程入鏡、未被其他人遮擋，且下半身沒有因為曝光或背景而糊掉。');
+        '確認選手雙腳全程入鏡、未被其他人遮擋，且下半身沒有因為曝光或背景而糊掉。',
+        wild.sort((a, b) => b.lowerMs - a.lowerMs)[0]?.startTime);
 
   const unprovable = (report.flights || []).filter(f => !(Number(f.lowerMs) > 0)).length;
   if (unprovable)
     add('info', `${unprovable} 段離地觀測無法證明任何長度`,
         '只觀察到單格雙腳離地時，取樣界線的下界是 0——這不構成證據，已與可證明的區間分開列示。',
-        '提高分析取樣 fps 才能把這類觀測變成可證明的區間。');
+        '提高分析取樣 fps 才能把這類觀測變成可證明的區間。',
+        (report.flights || []).find(f => !(Number(f.lowerMs) > 0))?.startTime);
 
   const missing = Number(s.frames) - Number(s.trackedFrames);
   const stop = report.trackingStop;
   if (stop && Number(stop.time) < .5 && Number.isFinite(c) && c < LOW_CONTINUITY)
     add('warn', `第 ${stop.time.toFixed(2)} 秒就失去配對`,
         '這麼早失聯，通常代表使用者確認的那一格骨架本身就不準；種子不準，後面全部跟著歪。',
-        '先按「辨識目前畫面人物」，確認縮圖上的骨架貼得住，再開始分析。');
+        '先按「辨識目前畫面人物」，確認縮圖上的骨架貼得住，再開始分析。',
+        Number(stop.time));
 
   if (!out.length && missing === 0)
     add('info', '沒有偵測到明顯的拍攝問題',
