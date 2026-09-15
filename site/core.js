@@ -105,6 +105,132 @@ export function estimateGroundY(frames) {
   return percentile(ys, 0.96);
 }
 
+// 時序處理常數。原本 footContact 直接對每一格的原始關鍵點做門檻判定，
+// 姿態估計的抖動會讓接地狀態逐格跳動；以下三項分別處理抖動、雜訊與單格假訊號。
+export const SMOOTH_CUTOFF_HZ = 50;   // 低通截止。步態分析慣用 10–12Hz，但那會抹掉 20–40ms 的觸地轉折
+export const SMOOTH_MIN_FRAMES = 8;   // 短於此長度不濾波——樣本太少，濾了反而失真
+export const NOISE_MARGIN = 6;        // 門檻至少要高出殘餘雜訊這麼多倍標準差
+export const MIN_CONTACT_MS = 60;     // 短於此的觸地是雜訊
+export const MIN_SWING_MS = 100;      // 腳離地後必須向前擺盪再落下，短於此的離地是掉格
+
+function butter2(cutoffHz, fs) {
+  const wc = Math.tan(Math.PI * cutoffHz / fs);
+  const k1 = Math.SQRT2 * wc, k2 = wc * wc, a0 = 1 + k1 + k2;
+  return { b: [k2 / a0, 2 * k2 / a0, k2 / a0], a: [1, 2 * (k2 - 1) / a0, (1 - k1 + k2) / a0] };
+}
+
+// Direct form I。狀態以 x[0] 為基準而非零：足部座標帶著 DC 偏移，
+// 若讓狀態從零開始，輸出會在開頭衝出一段幅度等同該偏移的假訊號。
+function lfilter(b, a, x) {
+  const off = x.length ? x[0] : 0, xs = x.map(v => v - off), y = new Array(xs.length).fill(0);
+  for (let n = 0; n < xs.length; n++) {
+    let acc = b[0] * xs[n];
+    if (n >= 1) acc += b[1] * xs[n - 1] - a[1] * y[n - 1];
+    if (n >= 2) acc += b[2] * xs[n - 2] - a[2] * y[n - 2];
+    y[n] = acc;
+  }
+  return y.map(v => v + off);
+}
+
+// 零相位低通：前向 + 後向各濾一次。相位延遲會直接變成觸地時刻的系統性偏差。
+// 邊界用鏡像填補而非奇對稱——奇對稱會把雜訊汙染的端點放大兩倍灌進濾波器。
+export function lowpass(values, fps, cutoffHz = SMOOTH_CUTOFF_HZ) {
+  if (!values || values.length < 4) return (values || []).slice();
+  const fc = Math.min(cutoffHz, fps * 0.4);
+  if (!(fc > 0 && fc < fps / 2)) return values.slice();
+  const { b, a } = butter2(fc, fps), p = Math.min(12, values.length - 1), head = [], tail = [];
+  for (let i = p; i >= 1; i--) head.push(values[i]);
+  for (let i = values.length - 2; i >= values.length - 1 - p && i >= 0; i--) tail.push(values[i]);
+  const padded = [...head, ...values, ...tail];
+  const back = lfilter(b, a, lfilter(b, a, padded).reverse()).reverse();
+  return back.slice(p, p + values.length);
+}
+
+// 殘餘雜訊（標準差）。量的是「濾波後還剩多少」而非「濾掉了多少」：
+// 低幀率的截止頻率被 Nyquist 夾得很高，濾波器其實沒濾掉多少東西。
+export function residualNoise(values) {
+  const v = (values || []).filter(Number.isFinite);
+  if (v.length < 3) return 0;
+  const rough = [];
+  for (let i = 1; i < v.length - 1; i++) rough.push(v[i] - (v[i - 1] + v[i + 1]) / 2);
+  const mean = rough.reduce((s, x) => s + x, 0) / rough.length;
+  const varr = rough.reduce((s, x) => s + (x - mean) ** 2, 0) / Math.max(1, rough.length - 1);
+  return Math.sqrt(varr) / 1.2247;
+}
+
+// 不可信區段以線性內插填補，不可沿用前一格——沿用會造出水平平台，
+// 而水平平台正是「腳踩在地上」的特徵，遮擋一發生就生出一次假觸地。
+export function fillGaps(values, valid) {
+  const out = values.slice(), n = out.length, first = valid.indexOf(true);
+  if (first < 0) return out;
+  const last = valid.lastIndexOf(true);
+  for (let i = 0; i < first; i++) out[i] = values[first];
+  for (let i = last + 1; i < n; i++) out[i] = values[last];
+  let i = first;
+  while (i <= last) {
+    if (valid[i]) { i++; continue; }
+    const s = i;
+    while (i <= last && !valid[i]) i++;
+    const y0 = values[s - 1], y1 = values[i], span = i - (s - 1);
+    for (let k = s; k < i; k++) out[k] = y0 + (y1 - y0) * (k - (s - 1)) / span;
+  }
+  return out;
+}
+
+// 單腳每一格的最低點（影像座標 y 向下為正，所以踩地時 y 最大）。
+export function footHeights(frames, side) {
+  const ids = side === 'L' ? [27, 29, 31] : [28, 30, 32], y = [], valid = [];
+  for (const f of frames || []) {
+    const pts = ids.map(i => f?.landmarks?.[i]).filter(p => p && (p.visibility ?? 1) > 0.3);
+    valid.push(pts.length >= 2);
+    y.push(pts.length ? Math.max(...pts.map(p => p.y)) : NaN);
+  }
+  return { y, valid };
+}
+
+// 把過短的 run 補掉。單格雜訊既能切斷一段真的觸地，也能造出一段假的離地；
+// 後者尤其危險——被切開的縫隙會被算成騰空，等於憑空生出一份犯規證據。
+function cleanRuns(states, fps) {
+  const dt = 1000 / Math.max(1, fps), out = states.slice();
+  const limits = { contact: MIN_CONTACT_MS, off: MIN_SWING_MS };
+  let i = 0;
+  while (i < out.length) {
+    const kind = out[i];
+    let j = i;
+    while (j < out.length && out[j] === kind) j++;
+    const before = i > 0 ? out[i - 1] : null, after = j < out.length ? out[j] : null;
+    // 只補「被同一種狀態夾住」的短 run，否則無從判斷該補成什麼
+    if (limits[kind] && before && before === after && (j - i) * dt < limits[kind]) {
+      for (let k = i; k < j; k++) out[k] = before;
+    }
+    i = j;
+  }
+  return out;
+}
+
+// 逐格接地狀態：'contact' | 'off' | 'unknown'。
+// 'unknown' 不可以當成 'off'——把「不知道」讀成「離地」會憑空生出騰空。
+export function contactStates(frames, side, groundY, fps, threshold = 0.018) {
+  const n = (frames || []).length;
+  if (!n || groundY == null) return new Array(n).fill('unknown');
+  const { y, valid } = footHeights(frames, side);
+  if (!valid.some(Boolean)) return new Array(n).fill('unknown');
+
+  let series = y, band = threshold;
+  if (n >= SMOOTH_MIN_FRAMES) {
+    series = lowpass(fillGaps(y, valid), fps);
+    // 雜訊大時放寬門檻：門檻一旦落進雜訊振幅，雜訊自己就會穿越門檻造出假事件
+    band = Math.max(threshold, NOISE_MARGIN * residualNoise(series));
+  }
+
+  const states = series.map((v, i) => {
+    if (!valid[i] || !Number.isFinite(v)) return 'unknown';
+    const gap = groundY - v;
+    return gap <= band && gap >= -band * 1.4 ? 'contact' : 'off';
+  });
+  return n >= SMOOTH_MIN_FRAMES ? cleanRuns(states, fps) : states;
+}
+
 export function footContact(landmarks, side, groundY, threshold = 0.018) {
   if (!landmarks || groundY == null) return 'unknown';
   const ids = side === 'L' ? [27, 29, 31] : [28, 30, 32];
@@ -115,29 +241,49 @@ export function footContact(landmarks, side, groundY, threshold = 0.018) {
   return gap <= threshold && gap >= -threshold * 1.4 ? 'contact' : 'off';
 }
 
+// 雙腳皆離地的區間，附取樣界線。
+//
+// lowerMs = (k-1)·Δ 是嚴謹的下界：觀察到連續 k 格雙腳離地、取樣間隔 Δ，
+// 這 k 格橫跨的時間就是真實騰空的一部分，所以騰空至少這麼長。任何幀率下
+// 都成立，不需要精度假設——這是粗篩唯一該依賴的數字。
+//
+// upperMs = (k+1)·Δ 不是嚴謹的上界，只是「若接地標記完全準確」時的估計。
+// 實際上接地門檻有寬度，腳剛離地時仍落在門檻帶內而被標成 contact，於是
+// 觀察到的離地區段是真實騰空的子集合。合成實測：240fps 下真值 90ms 的騰空
+// 只觀察到 18 格，upperMs 算出 79ms——比真值還小。判讀時請只採信 lowerMs。
+//
+// 下界本身也有一個前提：接地標記不會把真的觸地誤標成離地。地面高度若估得
+// 太高，踩穩的腳會被讀成離地，那時下界也不可信。estimateGroundY 取 96
+// 百分位就是為了偏保守。
+//
+// 前後必須是確定觸地這個條件不能省：若區段被 'unknown' 或序列端點夾住，
+// 騰空的起訖根本沒有被觀察到，連下界都失去依據——那段可能任意長。
 export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
-  const out = [];
-  let start = null;
+  const out = [], n = (frames || []).length;
+  if (!n) return out;
   const dt = 1000 / Math.max(1, fps);
-  for (let i = 0; i < frames.length; i++) {
-    const l = footContact(frames[i].landmarks, 'L', groundY, threshold);
-    const r = footContact(frames[i].landmarks, 'R', groundY, threshold);
-    const bothOff = l === 'off' && r === 'off';
-    if (bothOff && start == null) start = i;
-    if ((!bothOff || i === frames.length - 1) && start != null) {
-      const end = bothOff && i === frames.length - 1 ? i : i - 1;
-      const n = end - start + 1;
-      out.push({
-        startIndex: start,
-        endIndex: end,
-        startTime: frames[start].t,
-        endTime: frames[end].t,
-        frames: n,
-        lowerMs: Math.max(0, (n - 1) * dt),
-        upperMs: (n + 1) * dt,
-      });
-      start = null;
-    }
+  const L = contactStates(frames, 'L', groundY, fps, threshold);
+  const R = contactStates(frames, 'R', groundY, fps, threshold);
+  const off = i => L[i] === 'off' && R[i] === 'off';
+  const grounded = i => L[i] === 'contact' || R[i] === 'contact';
+
+  let i = 0;
+  while (i < n) {
+    if (!off(i)) { i++; continue; }
+    const start = i;
+    while (i < n && off(i)) i++;
+    const end = i - 1;
+    // 邊界未被確定觸地夾住 → 界線推不出來，寧可不報
+    if (start === 0 || i >= n || !grounded(start - 1) || !grounded(i)) continue;
+    const k = end - start + 1;
+    out.push({
+      startIndex: start, endIndex: end,
+      startTime: frames[start].t, endTime: frames[end].t,
+      frames: k,
+      lowerMs: Math.max(0, (k - 1) * dt),  // 嚴謹下界
+      upperMs: (k + 1) * dt,               // 估計值，非嚴謹上界（見上方說明）
+      bounded: true,
+    });
   }
   return out;
 }

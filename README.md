@@ -2,6 +2,39 @@
 
 ChatGPT rebuild of the browser racewalking analysis tool. This is not a byte-for-byte migration of the earlier hosted simulator. Model/identity accuracy is not established by UI or repeated-photo tests.
 
+## Flight measurement
+
+`site/core.js` reports double-support gaps with a sampling bound rather than a point
+estimate. Observing k consecutive frames with both feet off the ground at interval Δ,
+bounded on each side by a frame in confirmed contact, gives `lowerMs = (k-1)·Δ` as a
+rigorous lower bound on the real flight time. It holds at any frame rate and needs no
+accuracy assumption. Screening should rely on this value alone.
+
+`upperMs = (k+1)·Δ` is **not** a rigorous upper bound. The contact threshold has width,
+so a foot that has just left the ground still falls inside the band and is labelled
+contact; the observed run is a subset of the real flight. A synthetic 240 fps case with
+a true 90 ms flight observes 18 frames and reports `upperMs` of 79 ms — below the truth.
+The lower bound also assumes the ground estimate does not mislabel planted feet as
+airborne; `estimateGroundY` takes the 96th percentile to stay conservative.
+
+Runs bounded by `unknown` or by the ends of the sequence are dropped: the start and end
+of the flight were never observed, so no bound follows. Treating `unknown` as `off`
+would manufacture flight out of occlusion.
+
+Foot height is low-pass filtered (zero phase, mirror-padded, filter state referenced to
+the first sample) before thresholding, and the threshold widens with measured residual
+noise. Per-foot runs shorter than 60 ms of contact or 100 ms of swing are filled in — a
+foot cannot leave the ground and return within 100 ms, so a short gap is a dropped
+observation, not flight. Without this a single noisy frame splits one contact in two and
+the seam is counted as a flight interval.
+
+Sequences shorter than 8 frames are not filtered and fall back to per-frame thresholding.
+
+`node tests/contact.test.mjs` covers these invariants on synthetic gait with known
+ground truth: compliant 30 ms flights produce no provable marking at 240/120/60/30 fps,
+and 120 ms flights are provable at all four. Low frame rates lose sensitivity as missed
+detections, not false ones. None of this is measured accuracy on real video.
+
 ## Build
 
 ```sh

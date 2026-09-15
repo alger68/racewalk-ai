@@ -26,6 +26,7 @@ jobs:
           mkdir -p test-results
           python scripts/build_controller.py
           node tests/core.test.mjs
+          node tests/contact.test.mjs | tee test-results/contact.txt
           node tests/target-lock.test.mjs | tee test-results/target-lock.txt
           node tests/continuity.test.mjs | tee test-results/continuity.txt
           for file in site/*.js; do node --check "$file"; done
