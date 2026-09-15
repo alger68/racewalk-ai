@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {ContinuousTarget,dedupePoses,gapIntervals} from '../site/continuity.js';
+const pose=(x,y=.2)=>{const lm=Array.from({length:33},()=>({x,y,visibility:1,presence:1}));for(const [i,dx,dy] of [[11,-.025,0],[12,.025,0],[23,-.02,.12],[24,.02,.12],[25,-.02,.20],[26,.02,.20],[27,-.02,.30],[28,.02,.30],[29,-.02,.31],[30,.02,.31],[31,-.03,.32],[32,.03,.32]])lm[i]={x:x+dx,y:y+dy,visibility:1,presence:1};return lm;};
+const shirt=i=>({hist:Array.from({length:16},(_,j)=>Number(i===j))});
+const make=()=>new ContinuousTarget({id:'T001',landmarks:pose(.4),time:0,appearance:shirt(0),aspect:16/9});
+let count=0;const test=(name,fn)=>{fn();count++;console.log('PASS',name);};
+test('collapse duplicate anatomical observations',()=>assert.equal(dedupePoses([pose(.4),pose(.4001),pose(.8)],16/9).length,2));
+test('nearby distinct torsos remain separate',()=>assert.equal(dedupePoses([pose(.4),pose(.45)],16/9).length,2));
+test('duplicate suppression keeps higher quality observation',()=>{const a=pose(.4),b=pose(.4);a.forEach(p=>p.visibility=.5);assert.equal(dedupePoses([a,b])[0],b);});
+test('missing frame returns null index without halting scan',()=>{const t=make();assert.equal(t.match([],.033).index,-1);assert.equal(t.requiresReview,false);});
+test('three valid observations required for recovery',()=>{const t=make();t.match([],.033);assert.equal(t.match([pose(.4)],.066,[shirt(0)]).state,'reacquiring');assert.equal(t.match([pose(.4)],.1,[shirt(0)]).index,-1);assert.equal(t.match([pose(.4)],.133,[shirt(0)]).state,'recovered');});
+test('wrong outfit never provides recovery values',()=>{const t=make();t.match([],.033);for(let i=2;i<12;i++)assert.equal(t.match([pose(.4)],i/30,[shirt(6)]).index,-1);});
+test('distant bystander does not replace selected person',()=>{const t=make();for(let i=1;i<20;i++)assert.equal(t.match([pose(.8)],i/30,[shirt(0)]).index,-1);});
+test('long uncertainty requires explicit reselection',()=>{const t=make();t.match([],.033);assert.equal(t.match([pose(.4)],1,[shirt(0)]).state,'needs-review');assert.equal(t.match([pose(.4)],1.033,[shirt(0)]).index,-1);});
+test('ROI follows selected torso with bounded coordinates',()=>{const r=make().regionAt(.033);assert(r.x1<.4&&r.x2>.4&&r.y1<.26&&r.y2>.26);assert(r.x1>=0&&r.y1>=0&&r.x2<=1&&r.y2<=1);});
+test('uncertain interval metadata separates valid segments',()=>{const f=[{t:0,landmarks:pose(.4)},{t:.1,landmarks:null},{t:.2,landmarks:null},{t:.3,landmarks:pose(.4)},{t:.4,landmarks:null}];assert.deepEqual(gapIntervals(f).map(x=>x.frames),[2,1]);});
+console.log(JSON.stringify({suite:'continuity',cases:count,passed:true,scope:'synthetic invariants, not measured racewalking accuracy'}));

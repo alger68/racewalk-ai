@@ -1,9 +1,11 @@
 node_modules/
-.DS_Store
-*.log
+__pycache__/
+test-results/
 site/vendor/
 site/models/
 site/asset-manifest.json
 site/THIRD_PARTY_NOTICES.txt
-test-results/
-__pycache__/
+site/app.js
+site/ai-loader.js
+site/index.html
+tests/browser_smoke.py

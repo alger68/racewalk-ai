@@ -1,7 +1,7 @@
-name: Test target lock and deploy RaceWalk Lab
+name: Test continuity and deploy RaceWalk Lab
 on:
   push:
-    branches: [main, fix/strict-target-3.0.4]
+    branches: [main, fix/continuity-3.0.5]
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,25 +20,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Core and target-lock regression tests
+      - name: Build controller and run core/continuity regressions
         run: |
           set -o pipefail
           mkdir -p test-results
+          python scripts/build_controller.py
           node tests/core.test.mjs
           node tests/target-lock.test.mjs | tee test-results/target-lock.txt
+          node tests/continuity.test.mjs | tee test-results/continuity.txt
           for file in site/*.js; do node --check "$file"; done
-      - name: Build pinned SDK, WASM and model into site
+          python -m py_compile tests/browser_smoke.py tests/cache_smoke.py
+      - name: Build pinned SDK and model
         run: |
           python scripts/build_site.py
-          python -c "import json,pathlib; p=pathlib.Path('site/asset-manifest.json'); d=json.loads(p.read_text()); d['app']='3.0.4'; p.write_text(json.dumps(d,indent=2))"
-      - name: Install real-browser test dependencies
+          python -c "import json,pathlib; p=pathlib.Path('site/asset-manifest.json'); d=json.loads(p.read_text()); d['app']='3.0.5'; p.write_text(json.dumps(d,indent=2))"
+      - name: Install browser dependencies
         run: |
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium webkit
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Confirmed non-first target, ROI, lost-track stop and recovery
+      - name: Real inference and gap-preserving controller
         run: python tests/browser_smoke.py
-      - name: Save browser evidence
+      - name: Persistent model cache and corruption recovery
+        run: python tests/cache_smoke.py
+      - name: Save public-fixture test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -47,10 +52,8 @@ jobs:
             test-results/*.json
             test-results/*.png
             test-results/*.txt
-          if-no-files-found: warn
           retention-days: 14
-      - name: Package verified site
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: site
   deploy:
@@ -67,8 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/configure-pages@v5
-      - name: Deploy tested artifact to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
   verify-live:
     needs: deploy
@@ -79,22 +81,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install browsers and fixture encoder
+      - name: Build test controller and install browsers
         run: |
+          python scripts/build_controller.py
           python -m pip install playwright==1.57.0
           python -m playwright install --with-deps chromium webkit
           command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
-      - name: Verify confirmed target on published site
+      - name: Verify live inference and cache
         env:
           TEST_BASE_URL: ${{ needs.deploy.outputs.page_url }}
-        run: python tests/browser_smoke.py
-      - name: Save live-site evidence
-        if: always()
+        run: |
+          python tests/browser_smoke.py
+          python tests/cache_smoke.py
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: live-browser-evidence
           path: |
             test-results/*.json
             test-results/*.png
-          if-no-files-found: warn
           retention-days: 14

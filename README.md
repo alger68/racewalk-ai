@@ -1,42 +1,19 @@
-# RaceWalk Lab 3.0 — 宥蓁競走動作分析
+# RaceWalk Lab 3.0.5
 
-Clean ChatGPT rebuild. **No Claude source code is reused.**
+ChatGPT rebuild of the browser racewalking analysis tool. This is not a byte-for-byte migration of the earlier hosted simulator. Model/identity accuracy is not established by UI or repeated-photo tests.
 
-## 目標
+## Build
 
-以瀏覽器本機分析競走影片，支援：
-
-- 多人姿態偵測（最多 6 人）與目標選手鎖定
-- 骨架、肩線、髖線、軀幹參考線
-- 左右膝角度與 2 px 點位不確定度帶
-- 人工修正髖／膝／踝點位後立即重算
-- 地面線與疑似雙腳離地區間
-- JSON / CSV / HTML 報告匯出
-- 本機摘要紀錄（不保存影片）
-- 核心猴子測試 / invariants
-- GitHub Actions 測試通過後部署 Pages
-
-## 隱私
-
-影片透過瀏覽器本機載入與推論，不會由本程式提交到 GitHub。首次載入 AI 需要從 CDN 下載 MediaPipe WASM 與模型。
-
-## 分支策略
-
-`main` 是 RaceWalk Lab 3.0 正式主線。Claude 舊版完整保留於 `claude-legacy`，不參與本版分析與部署。
-
-## 本機驗證
-
-```bash
-node tests/core.test.mjs
-node --check site/core.js
-node --check site/app.js
-python3 -m http.server 8080 -d site
+```sh
+python scripts/build_controller.py
+python scripts/build_site.py
+python -m http.server 8000 --directory site
 ```
 
-瀏覽器開啟 `http://localhost:8080`。
+Controller, loader, entry HTML and inherited browser regressions are generated from the audited templates under `src/`. Edit the templates/build transformation, not ignored generated files. The transformation fails on unmatched required source blocks. New continuity logic is in `site/continuity.js`; previous strict association invariants remain in `site/target-lock.js`.
 
-## GitHub Pages
+3.0.5 deduplicates near-identical anatomical observations, uses a local target-following crop, continues scanning when measurements are unavailable, and requires three consistent observations before bounded recovery. More than 0.75 s of uncertainty requires explicit reselection; subsequent frames remain null rather than changing target. This trades coverage for caution and is not an identity guarantee.
 
-`.github/workflows/pages.yml` 在 `main` 更新時先測試，再部署 `site/`。
+The pinned 9,398,198-byte pose model is cached separately from the app version where CacheStorage is available. Corrupt cache is rejected. First-time transfer and WASM initialization are distinct; no promise of instant startup on every device.
 
-> 本工具是訓練與人工複查輔助，不是正式競走裁判系統。
+GitHub Actions build/test the emitted site, deploy the tested artifact and verify the live URL. Public CI uses public repeated-image fixtures and injected faults. Private user videos, pose outputs and screenshots must not be committed or uploaded as public CI artifacts.
