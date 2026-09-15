@@ -22,7 +22,7 @@ try:
     page.set_input_files('#videoInput',str(OUT/'fixture/pose.mp4'));page.wait_for_function("document.querySelector('#video').readyState>=2")
     page.wait_for_function("document.querySelector('#engineBadge').textContent.includes('AI 已載入')",timeout=120000)
     page.fill('#sampleFps','10');box=page.locator('#overlay').bounding_box();page.locator('#overlay').click(position={'x':box['width']/2,'y':box['height']/2})
-    page.click('#analyzeBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
+    page.click('#startHereBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
     row['after_app']=page.evaluate(pixels)
     page.screenshot(path=str(OUT/f'webkit-app-{width}.png'),full_page=True)
     page.locator('#video').scroll_into_view_if_needed();page.wait_for_timeout(300)
@@ -32,7 +32,7 @@ try:
     page.evaluate(await_prime);row['after_play']=page.evaluate(pixels)
     row['after_play_poses']=page.evaluate("()=>_probeEngine.detectForVideo(document.querySelector('#video'),20000).landmarks.length")
     page.evaluate('()=>_probeEngine.close()')
-    page.click('#analyzeBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
+    page.click('#startHereBtn');page.wait_for_function("/^(分析完成|分析未完成)/.test(document.querySelector('#status').textContent)",timeout=60000)
     row['repeat_app']=page.evaluate(pixels)
    except Exception as e:row['failure']=str(e);row['traceback']=traceback.format_exc()
    finally:

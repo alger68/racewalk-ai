@@ -79,8 +79,8 @@ async function waitForMedia(){
 }
 function updateControls(){
  const ready=!!state.videoUrl&&video.readyState>=2&&Number.isFinite(video.duration)&&video.duration>0;
- for(const id of ['analyzeBtn','startHereBtn','scanPeopleBtn','clearTargetBtn','selectBoxBtn','confirmTargetBtn'])$(id).disabled=state.analyzing;
- const label=state.targetSelection?'開始鎖定分析':state.pendingTarget?'請先確認這位選手':'開始 AI 分析';$('analyzeBtn').textContent=label;$('startHereBtn').textContent=label;
+ for(const id of ['startHereBtn','scanPeopleBtn','clearTargetBtn','selectBoxBtn','confirmTargetBtn'])$(id).disabled=state.analyzing;
+ const label=state.targetSelection?'開始鎖定分析':state.pendingTarget?'請先確認這位選手':'開始 AI 分析';$('startHereBtn').textContent=label;
  $('flowChecklist').textContent=`AI：${state.landmarker?'已就緒':state.aiPromise?'載入中':'待載入'} ｜ 影片：${video.error?'解碼錯誤':ready?'已解碼':state.videoUrl?'等待影格':'未匯入'} ｜ 目標：${state.targetSelection?state.targetSelection.id+' 已確認':state.pendingTarget?'待確認縮圖':'尚未指定'}`;
  $('stopBtn').disabled=!state.analyzing;liveProgress.hidden=!state.analyzing;$('stopBtn').style.cssText=state.analyzing?'position:fixed;right:16px;bottom:16px;z-index:999;background:#991b1b;color:white;padding:14px 24px;box-shadow:0 4px 18px #0004':'';
  $('initAi').disabled=!!state.aiPromise||state.analyzing;
@@ -140,7 +140,6 @@ async function presentFrame(){
 }
 function metricsFor(f){return computeFrameMetrics(f,{uncertaintyEnabled:$('uncertaintyEnabled').checked,sigmaPx:+$('sigmaPx').value||0,width:video.videoWidth||1920,height:video.videoHeight||1080});}
 function recomputeAll(){state.frames.forEach(f=>f.metrics=metricsFor(f));buildReport();drawChart();drawCurrent();}
-$('analyzeBtn').addEventListener('click',()=>analyze());
 $('stopBtn').addEventListener('click',()=>{state.stop=true;$('status').textContent='正在停止，等待目前影格結束…';});
 async function analyze(previewOnly=false){
  if(state.analyzing)return;state.lastError=null;

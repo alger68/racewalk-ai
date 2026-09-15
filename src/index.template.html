@@ -1,21 +1,21 @@
 <!doctype html>
 <html lang="zh-Hant"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0f172a">
-<title>RaceWalk Lab 3.0.4｜宥蓁競走動作分析</title>
+<title>RaceWalk Lab 3.0.4｜競走動作分析</title>
 <link rel="stylesheet" href="./styles.css?v=3.0.4"><link rel="stylesheet" href="./runtime-fix.css?v=3.0.4">
 </head><body>
-<header class="topbar"><div><div class="eyebrow">RACEWALK LAB 3.0.4 · CHATGPT REBUILD</div><h1>宥蓁競走動作分析</h1></div><div class="badges"><span id="engineBadge">正在啟動程式</span><span>影片只在本機處理</span></div></header>
+<header class="topbar"><div><div class="eyebrow">RACEWALK LAB 3.0.4 · CHATGPT REBUILD</div><h1>競走動作分析</h1></div><div class="badges"><span id="engineBadge">正在啟動程式</span><span>影片只在本機處理</span></div></header>
 <nav class="tabs" aria-label="主選單"><button class="tab active" data-tab="analyze">分析工作台</button><button class="tab" data-tab="report">本次報告</button><button class="tab" data-tab="records">訓練紀錄</button><button class="tab" data-tab="guide">拍攝指南</button></nav>
 <main><section id="analyze" class="panel active"><div class="grid two">
 <article class="card controls"><h2>01 本次拍攝</h2><div class="formgrid">
-<label>選手<input id="athlete" value="陳宥蓁"></label><label>日期<input id="date" type="date"></label>
+<label>選手<input id="athlete" placeholder="選手姓名或代號"></label><label>日期<input id="date" type="date"></label>
 <label>拍攝視角<select id="view"><option value="side-left">側面・左腳近鏡頭</option><option value="side-right">側面・右腳近鏡頭</option><option value="front">正面</option><option value="back">後面</option></select></label>
 <label>行進方向<select id="direction"><option value="right">畫面左 → 右</option><option value="left">畫面右 → 左</option></select></label>
 <label>影片 FPS<input id="fps" type="number" min="24" max="240" value="60"></label><label>分析取樣 FPS<input id="sampleFps" type="number" min="5" max="60" value="30"></label></div>
 <div class="switchrow"><label><input id="uncertaintyEnabled" type="checkbox" checked> 啟用角度誤差模擬</label><label>點位 σ <input id="sigmaPx" type="number" min="0" max="10" step="0.5" value="2"> px</label></div>
 <div class="switchrow"><label><input id="showSkeleton" type="checkbox" checked> 骨架</label><label><input id="showRefs" type="checkbox" checked> 身體參考線</label><label><input id="showAllPeople" type="checkbox" checked> 顯示所有偵測人物</label></div>
 <div class="dropzone"><input id="videoInput" type="file" accept="video/mp4,video/quicktime,video/webm"><strong>匯入競走影片</strong><small>MP4 / MOV / WebM；影片匯入不必等待 AI，原始影片不會提交到 GitHub。</small></div>
-<div class="actions"><button id="initAi" class="primary">載入 AI</button><button id="analyzeBtn" class="primary">開始 AI 分析</button><button id="stopBtn" disabled>停止</button></div>
+<div class="actions"><button id="initAi" class="primary">載入 AI</button><button id="stopBtn" disabled>停止</button></div>
 <div class="progress"><div id="progressBar"></div></div><p id="mediaStatus" class="status" role="status">尚未匯入影片。</p><p id="status" class="status" role="status">正在啟動…</p></article>
 <article class="card viewerCard"><div class="viewerHead"><div><h2>02 Judge View</h2><small>框選指定選手 → 選縮圖並確認 → 開始鎖定分析。金色框為指定目標；灰色為其他偵測人物。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
 <div id="stage" class="stage"><video id="video" playsinline muted preload="auto" controls></video><canvas id="overlay"></canvas><div id="clickHint">框選或點選目標，再確認縮圖</div></div>

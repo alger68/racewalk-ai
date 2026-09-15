@@ -1,5 +1,5 @@
 /** Conservative single-target association. IDs are session labels, not biometric identities. */
-import { bboxFromLandmarks } from './core.js?v=3.0.4';
+import { bboxFromLandmarks } from './core.js?v=3.0.5';
 const TORSO = [11, 12, 23, 24];
 const copyPose = pose => pose.map(p => p ? { ...p } : p);
 const good = p => p && Number.isFinite(p.x) && Number.isFinite(p.y) &&
