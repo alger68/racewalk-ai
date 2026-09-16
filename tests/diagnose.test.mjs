@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {diagnoseCapture,kneeChangeRate,affectedMetrics,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
+import {diagnoseCapture,kneeChangeRate,affectedMetrics,snapFps,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
         MAX_PLAUSIBLE_KNEE_RATE,MAX_PLAUSIBLE_FLIGHT_MS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
@@ -204,6 +204,17 @@ check('同一數字被多條點名時取最嚴重的',()=>{
 });
 
 check('沒有發現就沒有數字被質疑',()=>assert.deepEqual(affectedMetrics([]),{}));
+
+check('量到的幀率對到標準值，對不上就照實報',()=>{
+  assert.equal(snapFps(29.94),29.97,'量測誤差內應對到標準幀率');
+  assert.equal(snapFps(239.1),240);
+  assert.equal(snapFps(59.8),59.94);
+  assert.equal(snapFps(30),30);
+  // 對不上任何標準值就不要硬套
+  assert.equal(snapFps(160),160);
+  assert.equal(snapFps(37.26),37.3,'非標準幀率照實回報到小數一位');
+  for(const bad of [0,-5,NaN,Infinity,null,undefined]) assert.equal(snapFps(bad),null);
+});
 
 console.log(JSON.stringify({suite:'diagnose',cases,passed:true,
   scope:'capture-plausibility rules over report summaries; thresholds are not TR54 criteria and are not calibrated against real footage'}));

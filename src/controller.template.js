@@ -1,4 +1,4 @@
-import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics } from './core.js?v=3.0.4';
+import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics, snapFps } from './core.js?v=3.0.4';
 import { LockedTarget, describePose, selectionCandidates, sampleAppearance, contentRect } from './target-lock.js?v=3.0.4';
 import { createPoseEngine } from './ai-loader.js?v=3.0.4';
 const $=id=>document.getElementById(id);
@@ -103,7 +103,39 @@ $('videoInput').addEventListener('change',e=>{
  mediaMessage(`正在讀取 ${f.name}…`);video.src=state.videoUrl;video.load();updateControls();renderReport();drawCurrent();const expectedUrl=state.videoUrl;
  mediaTimer=setTimeout(()=>{if(state.videoUrl===expectedUrl&&video.readyState<2)mediaMessage('影片尚未完成解碼。請先按播放；若一直黑畫面，改用此瀏覽器可播放的 H.264 MP4（不是直接修改副檔名）。',true);},15000);
 });
-video.addEventListener('loadedmetadata',()=>{syncCanvas();$('timeSlider').max=Number.isFinite(video.duration)?video.duration:0;mediaMessage(`影片資訊已讀取：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}；等待畫面解碼。`);updateControls();drawCurrent();});
+// 影片幀率是手填欄位，沒人會記得改。取樣率被夾在這個值以內，
+// 所以填錯的代價是「用 240fps 拍的片子被當成 60fps 分析」——
+// 正好懲罰拍攝做對的人。量一次，填進去，並且講出來。
+async function measureFps(){
+ if(state.analyzing||!video.requestVideoFrameCallback)return null;
+ const t0=video.currentTime,wasMuted=video.muted;
+ try{
+  video.muted=true;
+  const times=await new Promise(resolve=>{
+   const got=[],deadline=setTimeout(()=>resolve(got),1800);
+   const tick=(_,meta)=>{got.push(meta.mediaTime);
+    if(got.length>=40){clearTimeout(deadline);resolve(got);return;}
+    video.requestVideoFrameCallback(tick);};
+   video.requestVideoFrameCallback(tick);
+   video.play().catch(()=>{clearTimeout(deadline);resolve(got);});
+  });
+  const span=times.length?times[times.length-1]-times[0]:0;
+  if(times.length<6||!(span>0))return null;
+  return snapFps((times.length-1)/span);
+ }finally{video.pause();video.muted=wasMuted;try{video.currentTime=t0;}catch{}}
+}
+async function detectAndFillFps(){
+ const fps=await measureFps();
+ if(fps==null){$('fpsNote').textContent='無法自動偵測幀率，請依拍攝設定手動填寫。';return;}
+ const field=+$('fps').value||0;
+ $('fps').value=fps;
+ $('fpsNote').textContent=(fps>=120
+  ?`偵測到 ${fps} fps，足以篩查騰空。`
+  :`偵測到 ${fps} fps；低於 120 fps，騰空篩查會以漏報的形式失去靈敏度。`)
+  +(field&&field!==fps?`（原填 ${field}，已更新）`:'');
+ updateControls();
+}
+video.addEventListener('loadedmetadata',()=>{syncCanvas();$('timeSlider').max=Number.isFinite(video.duration)?video.duration:0;mediaMessage(`影片資訊已讀取：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}；等待畫面解碼。`);updateControls();drawCurrent();detectAndFillFps().catch(()=>{$('fpsNote').textContent='幀率偵測失敗，請手動填寫。';});});
 video.addEventListener('loadeddata',()=>{clearTimeout(mediaTimer);mediaMessage(`影片已就緒：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}。`);$('clickHint').textContent='框選或點選目標，再確認縮圖';updateControls();drawCurrent();});
 video.addEventListener('canplay',updateControls);
 video.addEventListener('error',()=>{clearTimeout(mediaTimer);state.stop=true;mediaMessage(`影片解碼失敗（${video.error?.code??'?'}）。MOV/MP4 是容器；請確認影片能在此瀏覽器播放，必要時轉成 H.264 MP4，勿只改副檔名。`,true);updateControls();});

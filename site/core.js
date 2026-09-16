@@ -606,3 +606,16 @@ export function diagnoseCapture(report) {
 
   return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
 }
+
+// 量到的幀率會有小數誤差（29.97 量成 29.94 之類）。對到常見的標準值，
+// 對不上就照實回報四捨五入後的值——不要為了好看硬套一個標準幀率。
+export const COMMON_FPS = [24, 25, 29.97, 30, 50, 59.94, 60, 100, 120, 240];
+
+export function snapFps(measured, tolerance = 0.04) {
+  if (!Number.isFinite(measured) || measured <= 0) return null;
+  // 取最接近的，不是第一個落在容差內的——29.97 與 30 互相都在容差內，
+  // 用 find 會讓量到剛好 30 的片子被報成 29.97。
+  const near = COMMON_FPS.filter(f => Math.abs(measured - f) / f <= tolerance)
+    .sort((a, b) => Math.abs(measured - a) - Math.abs(measured - b));
+  return near.length ? near[0] : Math.round(measured * 10) / 10;
+}

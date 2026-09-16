@@ -87,6 +87,16 @@ to that moment.
 None of the shading is a verdict. The support-phase minimum is the number TR54 talks
 about; whether it constitutes a bent knee is a judgment this tool does not make.
 
+## Frame rate is measured, not declared
+
+Sampling is clamped to the video's frame rate, since sampling above the source only
+re-feeds the same frame and can manufacture a run of consecutive airborne frames. That
+clamp reads a hand-typed field, which would have punished exactly the person who shot
+at 240 fps and never edited it. The rate is now measured from the file on load via
+`requestVideoFrameCallback`, written into the field, and reported — including when the
+measurement contradicts what was typed. `snapFps` rounds to the nearest standard rate
+within 4% and otherwise reports what it measured rather than forcing a standard value.
+
 ## Self-diagnosis
 
 `diagnoseCapture` in `site/core.js` reads a finished report's own summary and says
