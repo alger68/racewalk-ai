@@ -181,7 +181,11 @@ export function fillGaps(values, valid) {
 export function footHeights(frames, side) {
   const ids = side === 'L' ? [27, 29, 31] : [28, 30, 32], y = [], valid = [];
   for (const f of frames || []) {
-    const pts = ids.map(i => f?.landmarks?.[i]).filter(p => p && (p.visibility ?? 1) > 0.3);
+    // 必須檢查數值有限：一個 NaN 會通過 fillGaps（valid=true），
+    // 然後在零相位濾波的遞迴裡向前向後擴散，把整段變成 unknown——
+    // 沒有騰空、沒有支撐期，而且完全無聲。
+    const pts = ids.map(i => f?.landmarks?.[i])
+      .filter(p => p && Number.isFinite(p.y) && (p.visibility ?? 1) > 0.3);
     valid.push(pts.length >= 2);
     y.push(pts.length ? Math.max(...pts.map(p => p.y)) : NaN);
   }
@@ -382,10 +386,13 @@ export function supportKnee(frames, groundY, fps, threshold = 0.018) {
       }
       if (!angles.length) continue;
       (side === 'L' ? out.left : out.right).push({
-        startIndex: start, endIndex: end,
+        // endIndex/endTime 一律指角度取值窗的結束（通過垂直位置，或退回觸地結束）。
+        // 觸地本身的結束另外給，不要讓兩個欄位描述不同的東西。
+        startIndex: start, endIndex: stop, contactEndIndex: end,
         supportIndex: support,
         partial: support == null,
         startTime: frames[start].t, endTime: frames[stop].t,
+        contactEndTime: frames[end].t,
         minAngle: Math.min(...angles),
       });
     }
@@ -506,12 +513,18 @@ export function diagnoseCapture(report) {
   const add = (level, title, cause, action, at) =>
     out.push({level, title, cause, action, at: Number.isFinite(at) ? at : null});
 
-  const sampleFps = Number(set.sampleFps);
-  if (Number.isFinite(sampleFps) && sampleFps < MIN_SCREENING_FPS)
+  const sampleFps = Number(set.sampleFps), sourceFps = Number(set.fps);
+  if (Number.isFinite(sampleFps) && sampleFps < MIN_SCREENING_FPS) {
+    // 建議要做得到。影片本身就不夠快時，叫人「提高取樣」是空話——
+    // 取樣率再高也只會重複同一格畫面。
+    const canRaise = Number.isFinite(sourceFps) && sourceFps >= MIN_SCREENING_FPS;
     add('blocker', `分析取樣 ${sampleFps} fps，不足以篩查騰空`,
         `40 ms 的騰空在 ${sampleFps} fps 下只有 ${Math.max(1, Math.round(40 / (1000 / sampleFps)))} 個取樣點，短騰空會直接漏掉。`,
-        '提高分析取樣 fps；若原始影片本身低於 120 fps，需重拍。膝角仍可參考。');
-        // 取樣率是整段的設定，沒有特定時間點可跳。
+        canRaise
+          ? `影片本身有 ${sourceFps} fps，把「分析取樣 FPS」調到 ${MIN_SCREENING_FPS} 以上即可，不必重拍。`
+          : `原始影片只有 ${Number.isFinite(sourceFps) ? sourceFps : '未知'} fps，取樣率再高也只是重複同一格畫面；要篩查騰空必須以 240 fps 重拍。膝角仍可參考。`);
+    // 取樣率是整段的設定，沒有特定時間點可跳。
+  }
 
   const c = Number(s.continuity);
   if (Number.isFinite(c) && c < VERY_LOW_CONTINUITY)
@@ -576,8 +589,12 @@ export function diagnoseCapture(report) {
 
   const missing = Number(s.frames) - Number(s.trackedFrames);
   const stop = report.trackingStop;
-  if (stop && Number(stop.time) < .5 && Number.isFinite(c) && c < LOW_CONTINUITY)
-    add('warn', `第 ${stop.time.toFixed(2)} 秒就失去配對`,
+  // 分析是從使用者確認的那一格開始的，不是從影片 0 秒。用絕對時間比較，
+  // 在 0:08 指定選手後立刻失聯就會被靜靜地漏掉。
+  const runStart = Number(report.targetSelection?.time) || 0;
+  const sinceStart = stop ? Number(stop.time) - runStart : null;
+  if (stop && Number.isFinite(sinceStart) && sinceStart < .5 && Number.isFinite(c) && c < LOW_CONTINUITY)
+    add('warn', `開始分析後 ${sinceStart.toFixed(2)} 秒就失去配對`,
         '這麼早失聯，通常代表使用者確認的那一格骨架本身就不準；種子不準，後面全部跟著歪。',
         '先按「辨識目前畫面人物」，確認縮圖上的骨架貼得住，再開始分析。',
         Number(stop.time));

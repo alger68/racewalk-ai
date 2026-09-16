@@ -68,7 +68,7 @@ before mid-stance — that phase falls back to the full contact interval and is 
 separately as `partialSupportPhases`, so a wider-than-specified window is visible rather
 than silent. The whole-clip minimum is kept in the report as `minLeftKneeWholeClip` /
 `minRightKneeWholeClip` for diagnosis, labelled as not being the rule's criterion.
-Report schema is now 5.
+Report schema is now 6.
 
 Off-sagittal camera placement biases measured knee angles low. The magnitude of that
 bias is not calibrated.

@@ -278,5 +278,28 @@ check('分帶吃 lowerMs，所以只會低估不會高估',()=>{
   }
 });
 
+check('單一 NaN 座標不會把整段變成無資料',()=>{
+  // NaN 通過可見度檢查後 valid 會是 true，fillGaps 不會補它，
+  // 然後零相位濾波的遞迴會把它向前向後擴散，整段靜悄悄地變成 unknown。
+  const g=gait({fps:240,flightMs:120});
+  const poisoned=g.frames.map((f,i)=>i!==40?f:{...f,landmarks:f.landmarks.map((p,j)=>
+    j===27?{...p,y:NaN}:p)});
+  const {y,valid}=footHeights(poisoned,'L');
+  assert.ok(y.every(Number.isFinite),'高度序列不該含 NaN');
+  assert.equal(valid[40],true,'其餘兩個足部點仍可信，這格不該整格作廢');
+  const before=flightIntervals(g.frames,g.ground,240).length;
+  assert.equal(flightIntervals(poisoned,g.ground,240).length,before,'一個壞座標不該改變結論');
+});
+
+check('支撐期的 index 與 time 描述同一格',()=>{
+  const f=legFrames({}),k=supportKnee(f,.9,30);
+  for(const phase of [...k.left,...k.right]){
+    assert.equal(f[phase.startIndex].t,phase.startTime);
+    assert.equal(f[phase.endIndex].t,phase.endTime,'endIndex 必須就是 endTime 那一格');
+    assert.equal(f[phase.contactEndIndex].t,phase.contactEndTime);
+    assert.ok(phase.endIndex<=phase.contactEndIndex,'取值窗不會超出觸地期');
+  }
+});
+
 console.log(JSON.stringify({suite:'contact',cases,passed:true,
   scope:'synthetic gait invariants and sampling-bound validity; not measured racewalking accuracy on real video'}));

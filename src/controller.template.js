@@ -99,7 +99,7 @@ window.addEventListener('resize',()=>{syncCanvas();drawCurrent();});
 $('videoInput').addEventListener('change',e=>{
  const f=e.target.files?.[0];if(!f||state.analyzing)return;video.pause();clearTimeout(mediaTimer);if(state.videoUrl)URL.revokeObjectURL(state.videoUrl);
  state.videoUrl=URL.createObjectURL(f);state.frames=[];state.clickTime=0;state.report=null;state.maxPeople=0;state.lastError=null;state.runSelection=null;state.trackingStop=null;resetTarget();boxMode(false);setPhase('media','正在匯入影片…');
- $('clickHint').style.display='block';$('clickHint').textContent='等待影片解碼…';$('personCount').textContent='0 / 0';$('quickStats').replaceChildren();$('events').replaceChildren();$('angleNow').textContent='L — / R —';$('progressBar').style.width='0%';$('timeSlider').value=0;$('timeSlider').max=0;
+ $('clickHint').style.display='block';$('clickHint').textContent='等待影片解碼…';$('personCount').textContent='0 / 0';$('quickStats').replaceChildren();$('events').replaceChildren();$('diagnosis').replaceChildren();$('verdict').replaceChildren();$('verdict').className='verdict';$('quickTarget').textContent='';$('angleNow').textContent='L — / R —';$('progressBar').style.width='0%';$('timeSlider').value=0;$('timeSlider').max=0;
  mediaMessage(`正在讀取 ${f.name}…`);video.src=state.videoUrl;video.load();updateControls();renderReport();drawCurrent();const expectedUrl=state.videoUrl;
  mediaTimer=setTimeout(()=>{if(state.videoUrl===expectedUrl&&video.readyState<2)mediaMessage('影片尚未完成解碼。請先按播放；若一直黑畫面，改用此瀏覽器可播放的 H.264 MP4（不是直接修改副檔名）。',true);},15000);
 });
@@ -162,7 +162,10 @@ async function analyze(previewOnly=false){
   const tracker=new LockedTarget({id:selected.id,landmarks:selected.landmarks,time:selected.time,appearance:selected.appearance,aspect:video.videoWidth/video.videoHeight});
   state.runSelection={id:selected.id,time:selected.time,method:selected.method,index:selected.index,policy:'explicit-confirmation; immutable-seed; halt-on-loss-or-ambiguity'};
   clearPreview();started=true;state.frames=[];state.report=null;state.maxPeople=0;state.trackingStop=null;
-  const sampleFps=Math.max(5,Math.min(60,+$('sampleFps').value||30));$('sampleFps').value=sampleFps;
+  const sourceFps=Math.max(1,+$('fps').value||30);
+  // 取樣高於影片本身的幀率不會多出資訊，只會把同一格重複送進偵測，
+  // 反而可能造出不存在的連續離地。夾在影片幀率以內。
+  const sampleFps=Math.max(5,Math.min(240,sourceFps,+$('sampleFps').value||30));$('sampleFps').value=sampleFps;
   const clipSeconds=Math.max(1,Math.min(60,+$('clipSeconds').value||15));$('clipSeconds').value=clipSeconds;
   const start=Math.min(selected.time,Math.max(0,video.duration-.001)),end=Math.min(video.duration,start+clipSeconds),dt=1/sampleFps,count=Math.max(1,Math.ceil((end-start)*sampleFps)),base=state.lastTimestamp+1000;
   setPhase('analyzing',`準備分析 ${formatTime(start)}–${formatTime(end)}，共 ${count} 格…`);
@@ -205,6 +208,9 @@ const BAND_FILL={'below-reported':'#47556922','at-threshold':'#b4530922','above-
 const chartX=(t,w)=>36+(t/(video.duration||1))*(w-44);
 const chartTime=(px,w)=>{const d=video.duration||0;return Math.max(0,Math.min(d,((px-36)/Math.max(1,w-44))*d));};
 function mapY(a,h){const v=Math.max(A_MIN,Math.min(A_MAX,a??A_MAX));return CHART_TOP+(A_MAX-v)/(A_MAX-A_MIN)*(h-CHART_TOP-CHART_BOT);}
+// 被夾在座標下限的值畫起來是一條貼著底線的平順曲線，看起來像資料。
+// 數出來並在圖上講明，不要讓超出範圍的東西假裝在範圍內。
+function clippedCount(){let n=0;for(const f of state.frames)for(const k of ['leftKnee','rightKnee']){const v=f.metrics?.[k]?.value;if(Number.isFinite(v)&&v<A_MIN)n++;}return n;}
 function drawLine(key,color,w,h){cctx.strokeStyle=color;cctx.lineWidth=2;cctx.beginPath();let started=false;for(const f of state.frames){const v=f.metrics?.[key]?.value;if(v==null){started=false;continue;}const x=chartX(f.t,w),y=mapY(v,h);if(!started){cctx.moveTo(x,y);started=true;}else cctx.lineTo(x,y);}cctx.stroke();}
 function frameRuns(predicate){const runs=[];let run=null;for(const f of state.frames){if(predicate(f)){if(!run){run={a:f.t,b:f.t};runs.push(run);}run.b=f.t;}else run=null;}return runs;}
 // 沒有可靠配對的影格：線只是斷掉，跟「角度正常」長得一樣，所以要畫出來。
@@ -294,6 +300,8 @@ function drawChart(){
   cctx.fillStyle='#94a3b8';cctx.fillText(String(a),6,y+4);
  }
  cctx.fillStyle='#94a3b8';cctx.font='10px system-ui';cctx.fillText('180°＝完全伸直',w-92,mapY(180,h)-5);
+ const clipped=clippedCount();
+ if(clipped){cctx.fillStyle='#b91c1c';cctx.font='10px system-ui';cctx.fillText(`${clipped} 個取樣低於 ${A_MIN}°，已壓在底線（非真實形狀）`,36,mapY(A_MIN,h)-4);}
  drawTimeAxis(w,h);chartLegend(w,h);
  if(state.frames.length>=2){
   drawBand('leftKnee','#0f766e33',w,h);drawBand('rightKnee','#7c3aed22',w,h);
@@ -317,7 +325,7 @@ function drawBand(key,color,w,h){const pts=state.frames.map(f=>({t:f.t,m:f.metri
 function buildReport(){
  if(!state.frames.length){state.report=null;return;}
  const gy=+$('groundSlider').value,fps=+$('sampleFps').value||30,flights=flightIntervals(state.frames,gy,fps),knee=supportKnee(state.frames,gy,fps),valid=state.frames.filter(f=>f.landmarks).length,l=state.frames.map(f=>f.metrics?.leftKnee?.value).filter(Number.isFinite),r=state.frames.map(f=>f.metrics?.rightKnee?.value).filter(Number.isFinite);
- state.report={schema:5,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
+ state.report={schema:6,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}

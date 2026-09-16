@@ -27,6 +27,18 @@ check('低於篩查幀率是 blocker，且算得出取樣點數',()=>{
   assert.ok(diagnoseCapture(ok({settings:{sampleFps:MIN_SCREENING_FPS}})).every(x=>!x.title.includes('不足以篩查')));
 });
 
+check('取樣率的建議必須是做得到的事',()=>{
+  // 影片有 240 fps：調設定就好，不必重拍
+  const raise=diagnoseCapture(ok({settings:{sampleFps:30,fps:240}}))[0];
+  assert.ok(raise.action.includes('不必重拍'),raise.action);
+  assert.ok(raise.action.includes(String(MIN_SCREENING_FPS)));
+  // 影片本身只有 30 fps：叫人提高取樣是空話，取樣再高只是重複同一格
+  const reshoot=diagnoseCapture(ok({settings:{sampleFps:30,fps:30}}))[0];
+  assert.ok(reshoot.action.includes('重拍'),reshoot.action);
+  assert.ok(reshoot.action.includes('重複同一格'),'要講清楚為什麼提高取樣沒有用');
+  assert.ok(!reshoot.action.includes('不必重拍'));
+});
+
 check('連續率分兩級，措辭不同',()=>{
   assert.equal(diagnoseCapture(ok({summary:{continuity:.283}}))[0].level,'blocker');
   const warn=diagnoseCapture(ok({summary:{continuity:.6}}));
@@ -52,6 +64,16 @@ check('未標記騰空講的是「沒有證明」，不是「沒有騰空」',()
   const f=diagnoseCapture(ok({summary:{flightIntervals:0}})).find(x=>x.title.includes('未標記'));
   assert.ok(f.cause.includes('沒有證明')&&f.cause.includes('漏報'));
   assert.equal(f.level,'info');
+});
+
+check('早期失聯以分析起點為基準，不是影片絕對時間',()=>{
+  // 在 0:08 指定選手後立刻失聯，一樣要被指出來
+  const late={...ok({summary:{continuity:.3},trackingStop:{time:8.1667}}),targetSelection:{time:8}};
+  assert.ok(diagnoseCapture(late).some(f=>f.title.includes('開始分析後 0.17 秒')),
+    JSON.stringify(diagnoseCapture(late).map(f=>f.title)));
+  // 從 0 秒開始、8 秒才失聯，那不是「一開始就失聯」
+  const fine={...ok({summary:{continuity:.3},trackingStop:{time:8}}),targetSelection:{time:0}};
+  assert.ok(!diagnoseCapture(fine).some(f=>f.title.includes('失去配對')));
 });
 
 check('早期失聯只在連續率也低時才歸因於種子骨架',()=>{
