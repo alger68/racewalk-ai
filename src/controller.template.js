@@ -1,4 +1,4 @@
-import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics, snapFps } from './core.js?v=3.0.4';
+import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics, snapFps, medianFps } from './core.js?v=3.0.4';
 import { LockedTarget, describePose, selectionCandidates, sampleAppearance, contentRect } from './target-lock.js?v=3.0.4';
 import { createPoseEngine } from './ai-loader.js?v=3.0.4';
 const $=id=>document.getElementById(id);
@@ -119,9 +119,7 @@ async function measureFps(){
    video.requestVideoFrameCallback(tick);
    video.play().catch(()=>{clearTimeout(deadline);resolve(got);});
   });
-  const span=times.length?times[times.length-1]-times[0]:0;
-  if(times.length<6||!(span>0))return null;
-  return snapFps((times.length-1)/span);
+  return snapFps(medianFps(times));
  }finally{video.pause();video.muted=wasMuted;try{video.currentTime=t0;}catch{}}
 }
 async function detectAndFillFps(){

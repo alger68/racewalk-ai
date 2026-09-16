@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {diagnoseCapture,kneeChangeRate,affectedMetrics,snapFps,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
+import {diagnoseCapture,kneeChangeRate,affectedMetrics,snapFps,medianFps,MIN_SCREENING_FPS,LOW_CONTINUITY,IMPLAUSIBLE_SUPPORT_KNEE,
         MAX_PLAUSIBLE_KNEE_RATE,MAX_PLAUSIBLE_FLIGHT_MS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
@@ -204,6 +204,28 @@ check('同一數字被多條點名時取最嚴重的',()=>{
 });
 
 check('沒有發現就沒有數字被質疑',()=>assert.deepEqual(affectedMetrics([]),{}));
+
+check('幀率用間隔中位數，不被開頭的暖機拖低',()=>{
+  // play() 之後最初幾格間隔不規則，之後穩定在 1/120 秒
+  const t=[0,.09,.14,...Array.from({length:30},(_,i)=>.14+(i+1)/120)];
+  assert.ok(Math.abs(medianFps(t)-120)<1,`得到 ${medianFps(t)}`);
+  // 用平均會被拖低到明顯偏離
+  const mean=(t.length-1)/(t[t.length-1]-t[0]);
+  assert.ok(mean<110,`這個案例的平均應該明顯偏低，得到 ${mean}`);
+});
+
+check('變動幀率：掉幾格不改變節奏判定',()=>{
+  const t=[];let x=0;
+  for(let i=0;i<40;i++){x+=(i%9===0?2:1)/60;t.push(x);}  // 每 9 格掉一格
+  assert.ok(Math.abs(medianFps(t)-60)<1,`得到 ${medianFps(t)}`);
+});
+
+check('樣本不足或時間倒退時不猜',()=>{
+  assert.equal(medianFps([]),null);
+  assert.equal(medianFps([0,.1,.2]),null,'扣掉暖機後樣本太少');
+  assert.equal(medianFps(Array(20).fill(0.5)),null,'時間沒有前進就沒有間隔可言');
+  assert.equal(medianFps(null),null);
+});
 
 check('量到的幀率對到標準值，對不上就照實報',()=>{
   assert.equal(snapFps(29.94),29.97,'量測誤差內應對到標準幀率');

@@ -611,6 +611,21 @@ export function diagnoseCapture(report) {
 // 對不上就照實回報四捨五入後的值——不要為了好看硬套一個標準幀率。
 export const COMMON_FPS = [24, 25, 29.97, 30, 50, 59.94, 60, 100, 120, 240];
 
+// 從一串影格呈現時間算幀率。用相鄰間隔的中位數，不用「格數 ÷ 總時距」：
+// play() 之後最初幾格的間隔不規則（解碼器暖機），平均會被拖低；
+// 而且錄影檔常常是變動幀率，本來就沒有單一的「總平均」可言。
+export function medianFps(mediaTimes, warmup = 2) {
+  const t = (mediaTimes || []).filter(Number.isFinite);
+  const gaps = [];
+  for (let i = warmup + 1; i < t.length; i++) {
+    const d = t[i] - t[i - 1];
+    if (d > 0) gaps.push(d);
+  }
+  if (gaps.length < 5) return null;
+  const mid = percentile(gaps, 0.5);
+  return mid > 0 ? 1 / mid : null;
+}
+
 export function snapFps(measured, tolerance = 0.04) {
   if (!Number.isFinite(measured) || measured <= 0) return null;
   // 取最接近的，不是第一個落在容差內的——29.97 與 30 互相都在容差內，

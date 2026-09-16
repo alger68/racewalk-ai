@@ -97,6 +97,15 @@ at 240 fps and never edited it. The rate is now measured from the file on load v
 measurement contradicts what was typed. `snapFps` rounds to the nearest standard rate
 within 4% and otherwise reports what it measured rather than forcing a standard value.
 
+The rate comes from the median gap between presented frames, not from frames divided by
+elapsed time. Verifying this in a real browser is what showed why: on a clip recorded at
+a 30 fps cadence the mean read 19.8, because the first frames after `play()` are
+irregular while the decoder warms up, and because a recording is variable frame rate and
+drops frames under load. The median recovers the cadence, which is the number sampling
+must align to — aligning to the average would under-sample every frame.
+`tests/fps_smoke.py` records a clip in the browser and holds this end to end, including
+that the measurement restores the video's position and mute state.
+
 ## Self-diagnosis
 
 `diagnoseCapture` in `site/core.js` reads a finished report's own summary and says

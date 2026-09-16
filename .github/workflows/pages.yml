@@ -45,6 +45,8 @@ jobs:
         run: python tests/browser_smoke.py
       - name: Persistent model cache and corruption recovery
         run: python tests/cache_smoke.py
+      - name: Frame-rate measurement in a real browser
+        run: python tests/fps_smoke.py
       - name: Save public-fixture test evidence
         if: always()
         uses: actions/upload-artifact@v4
