@@ -634,3 +634,68 @@ export function snapFps(measured, tolerance = 0.04) {
     .sort((a, b) => Math.abs(measured - a) - Math.abs(measured - b));
   return near.length ? near[0] : Math.round(measured * 10) / 10;
 }
+
+// ---- 教練看得懂的指標 ---------------------------------------------------
+// 觸地狀態早就算出來了，卻只拿去找騰空。步頻、觸地時間、左右對稱這三項
+// 對日常訓練比「騰空毫秒數」有用得多，而且完全不碰規則判定——
+// 它們回答的是「你的動作怎麼樣」，不是「你有沒有犯規」。
+//
+// 只採計兩端都被觀察到 off 夾住的觸地期。碰到影片頭尾或 unknown 的觸地是
+// 截斷的，長度不知道；把截斷值混進平均，會把平均往下拉而且無聲。
+// 這與 flightIntervals 只採計有界區間是同一個標準。
+
+export const MIN_COMPLETE_CONTACTS = 4;   // 少於此不談步頻與對稱性
+
+function completeContacts(frames, side, groundY, fps, threshold) {
+  const states = contactStates(frames, side, groundY, fps, threshold);
+  const out = [];
+  for (const run of runsOf(states, 'contact')) {
+    if (run.start === 0 || run.end === states.length - 1) continue;
+    if (states[run.start - 1] !== 'off' || states[run.end + 1] !== 'off') continue;
+    const ms = (frames[run.end].t - frames[run.start].t) * 1000;
+    if (ms > 0) out.push({ startTime: frames[run.start].t, endTime: frames[run.end].t, ms });
+  }
+  return out;
+}
+
+const mean = xs => xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+
+// 步態文獻常用的對稱性指標：|L-R| / 平均 × 100%。0% 完全對稱。
+export function asymmetryPct(left, right) {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return null;
+  const avg = (left + right) / 2;
+  return avg > 0 ? Math.abs(left - right) / avg * 100 : null;
+}
+
+export function gaitMetrics(frames, groundY, fps, threshold = 0.018) {
+  const empty = {contacts: {left: [], right: []}, contactMs: {left: null, right: null},
+                 cadenceSpm: null, asymmetry: {contactPct: null}, completeContacts: 0, enough: false};
+  if (!frames?.length || groundY == null || !(fps > 0)) return empty;
+
+  const left = completeContacts(frames, 'L', groundY, fps, threshold);
+  const right = completeContacts(frames, 'R', groundY, fps, threshold);
+  const all = [...left, ...right].sort((a, b) => a.startTime - b.startTime);
+  const contactMs = {left: mean(left.map(c => c.ms)), right: mean(right.map(c => c.ms))};
+
+  // 步頻用「相鄰觸地起點的間隔」，不是「步數 ÷ 影片長度」：
+  // 影片頭尾各有一段不完整的週期，用總長度會把步頻算低。
+  let cadenceSpm = null;
+  if (all.length >= MIN_COMPLETE_CONTACTS) {
+    const gaps = [];
+    for (let i = 1; i < all.length; i++) {
+      const d = all[i].startTime - all[i - 1].startTime;
+      if (d > 0) gaps.push(d);
+    }
+    const mid = gaps.length ? percentile(gaps, 0.5) : 0;
+    if (mid > 0) cadenceSpm = 60 / mid;
+  }
+
+  return {
+    contacts: {left, right},
+    contactMs,
+    cadenceSpm,
+    asymmetry: {contactPct: asymmetryPct(contactMs.left, contactMs.right)},
+    completeContacts: all.length,
+    enough: all.length >= MIN_COMPLETE_CONTACTS,
+  };
+}

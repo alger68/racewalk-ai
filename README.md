@@ -106,6 +106,18 @@ must align to — aligning to the average would under-sample every frame.
 `tests/fps_smoke.py` records a clip in the browser and holds this end to end, including
 that the measurement restores the video's position and mute state.
 
+## Coaching metrics
+
+The contact states were already computed and only used to find flight. `gaitMetrics`
+also derives cadence, per-foot contact time and left/right asymmetry — quantities a
+coach can act on this week, and which say nothing about TR54. Only contacts bounded by
+observed lift-off on both sides are counted, so a contact truncated by the start or end
+of the clip cannot drag the mean down silently, the same standard `flightIntervals`
+applies. Cadence comes from the median interval between successive contacts rather than
+steps over clip length, which would count the incomplete cycles at each end. Below four
+complete contacts the panel says so instead of computing from one or two steps. The 10%
+asymmetry mark is a prompt to look, not a calibrated threshold.
+
 ## Self-diagnosis
 
 `diagnoseCapture` in `site/core.js` reads a finished report's own summary and says

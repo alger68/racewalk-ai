@@ -1,4 +1,4 @@
-import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics, snapFps, medianFps } from './core.js?v=3.0.4';
+import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, computeFrameMetrics, runMonkeyCore, DETECTION_BANDS, DETECTION_SOURCE, diagnoseCapture, affectedMetrics, snapFps, medianFps, gaitMetrics } from './core.js?v=3.0.4';
 import { LockedTarget, describePose, selectionCandidates, sampleAppearance, contentRect } from './target-lock.js?v=3.0.4';
 import { createPoseEngine } from './ai-loader.js?v=3.0.4';
 const $=id=>document.getElementById(id);
@@ -354,8 +354,8 @@ chart.addEventListener('pointerup',e=>{try{chart.releasePointerCapture(e.pointer
 function drawBand(key,color,w,h){const pts=state.frames.map(f=>({t:f.t,m:f.metrics?.[key]})).filter(x=>x.m?.low!=null);if(pts.length<2)return;cctx.fillStyle=color;cctx.beginPath();pts.forEach((p,i)=>{const x=36+p.t/(video.duration||1)*(w-44),y=mapY(p.m.high,h);i?cctx.lineTo(x,y):cctx.moveTo(x,y);});[...pts].reverse().forEach(p=>cctx.lineTo(36+p.t/(video.duration||1)*(w-44),mapY(p.m.low,h)));cctx.closePath();cctx.fill();}
 function buildReport(){
  if(!state.frames.length){state.report=null;return;}
- const gy=+$('groundSlider').value,fps=+$('sampleFps').value||30,flights=flightIntervals(state.frames,gy,fps),knee=supportKnee(state.frames,gy,fps),valid=state.frames.filter(f=>f.landmarks).length,l=state.frames.map(f=>f.metrics?.leftKnee?.value).filter(Number.isFinite),r=state.frames.map(f=>f.metrics?.rightKnee?.value).filter(Number.isFinite);
- state.report={schema:6,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
+ const gy=+$('groundSlider').value,fps=+$('sampleFps').value||30,flights=flightIntervals(state.frames,gy,fps),knee=supportKnee(state.frames,gy,fps),gait=gaitMetrics(state.frames,gy,fps),valid=state.frames.filter(f=>f.landmarks).length,l=state.frames.map(f=>f.metrics?.leftKnee?.value).filter(Number.isFinite),r=state.frames.map(f=>f.metrics?.rightKnee?.value).filter(Number.isFinite);
+ state.report={schema:6,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),cadenceSpm:gait.cadenceSpm,contactMsLeft:gait.contactMs.left,contactMsRight:gait.contactMs.right,contactAsymmetryPct:gait.asymmetry.contactPct,completeContacts:gait.completeContacts,manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,gait,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}
@@ -373,6 +373,16 @@ function renderQuick(){if(!state.report)return;const s=state.report.summary;
   stat('左膝支撐期最小角',s.minLeftKneeSupport==null?'—':s.minLeftKneeSupport.toFixed(1)+'°',hit.knee)+
   stat('右膝支撐期最小角',s.minRightKneeSupport==null?'—':s.minRightKneeSupport.toFixed(1)+'°',hit.knee)+
   stat('可證明的騰空區間',String((state.report.flights||[]).filter(f=>f.lowerMs>0).length),hit.flight);
+ const g=state.report.gait;
+ $('coach').innerHTML=g?.enough
+  ?`<h3>動作指標</h3><div class="coachRow">`+
+    coachStat('步頻',g.cadenceSpm==null?'—':g.cadenceSpm.toFixed(0),'步/分')+
+    coachStat('觸地時間 左',num(g.contactMs.left),'ms')+
+    coachStat('觸地時間 右',num(g.contactMs.right),'ms')+
+    coachStat('左右差異',g.asymmetry.contactPct==null?'—':g.asymmetry.contactPct.toFixed(1),'%',
+              g.asymmetry.contactPct!=null&&g.asymmetry.contactPct>10?'warn':'')+
+    `</div><p class="muted">取自 ${g.completeContacts} 次完整觸地（兩端都觀察到離地的才算）。這些是動作描述，與 TR54 判定無關。左右差異 10% 以上值得注意，但門檻未經校準。</p>`
+  :'<h3>動作指標</h3><p class="muted">完整觸地不足 4 次，無法給步頻與左右對稱。影片太短、或追蹤中斷太多都會這樣——用一兩步硬算出來的數字沒有意義。</p>';
  $('quickTarget').textContent=`指定選手 ${state.report.targetSelection?.id||'—'} · 取樣 ${state.report.settings?.sampleFps??'—'} fps · ${s.frames} 格`;
  $('events').innerHTML=(()=>{
   const all=state.report.flights||[],provable=all.filter(e=>e.lowerMs>0),weak=all.length-provable.length;
@@ -380,6 +390,8 @@ function renderQuick(){if(!state.report)return;const s=state.report.summary;
   const note=weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'';
   return rows?rows+note:`<p class="muted">未標記可證明的雙腳離地；這是「沒有證明」，不是「沒有騰空」。${weak?`（有 ${weak} 段單格觀測不構成證據。）`:''}</p>`;
 })();document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
+function coachStat(k,v,unit,level){
+ return `<div class="coachStat${level?' '+level:''}"><span>${k}</span><strong>${v}</strong><i>${unit}</i></div>`;}
 function stat(k,v,level){
  // 受質疑的數字不該用同樣的大字呈現。標示它，而不是讓人往下讀才發現不能用。
  const note=level==='blocker'?'此數字不可判讀':level==='warn'?'判讀請保留':'';
