@@ -259,7 +259,7 @@ function drawGaps(w,h){
 function drawSupportPhases(w,h){
  const knee=state.report?.supportKnee;if(!knee)return;
  const top=CHART_TOP,bottom=h-CHART_BOT;let lastLabelEnd=-Infinity;
- for(const [side,fill,ink] of [['left','#0f766e14','#0f766e'],['right','#7c3aed14','#7c3aed']]){
+ for(const [side,fill,ink] of [['left','#0d948814','#0d9488'],['right','#7c3aed14','#7c3aed']]){
   for(const phase of knee[side]||[]){
    if(phase.startTime==null||phase.endTime==null)continue;
    const x1=chartX(phase.startTime,w),x2=Math.max(x1+2,chartX(phase.endTime,w));
@@ -297,7 +297,7 @@ function drawFlights(w,h){
  }
 }
 function chartLegend(w,h){
- const y=h-34,items=[['#0f766e','左膝'],['#7c3aed','右膝'],['#0f766e33','支撐期（TR54 判準範圍）'],['#e2e8f0','未配對·留白'],['#b4530955','疑似騰空']];
+ const y=h-34,items=[['#0d9488','左膝'],['#7c3aed','右膝'],['#0d948833','支撐期（TR54 判準範圍）'],['#e2e8f0','未配對·留白'],['#b4530955','疑似騰空']];
  let x=36;cctx.font='11px system-ui';
  for(const [color,label] of items){
   cctx.fillStyle=color;cctx.fillRect(x,y-8,10,10);
@@ -334,8 +334,8 @@ function drawChart(){
  if(clipped){cctx.fillStyle='#b91c1c';cctx.font='10px system-ui';cctx.fillText(`${clipped} 個取樣低於 ${A_MIN}°，已壓在底線（非真實形狀）`,36,mapY(A_MIN,h)-4);}
  drawTimeAxis(w,h);chartLegend(w,h);
  if(state.frames.length>=2){
-  drawBand('leftKnee','#0f766e33',w,h);drawBand('rightKnee','#7c3aed22',w,h);
-  drawLine('leftKnee','#0f766e',w,h);drawLine('rightKnee','#7c3aed',w,h);
+  drawBand('leftKnee','#0d948833',w,h);drawBand('rightKnee','#7c3aed22',w,h);
+  drawLine('leftKnee','#0d9488',w,h);drawLine('rightKnee','#7c3aed',w,h);
  }
  const x=chartX(video.currentTime,w);
  cctx.strokeStyle='#ef4444';cctx.lineWidth=1.5;cctx.beginPath();cctx.moveTo(x,CHART_TOP);cctx.lineTo(x,bottom);cctx.stroke();
@@ -440,10 +440,116 @@ const RECORD_COLUMNS=[
  ['provableFlights','可證明騰空',r=>r.summary?.flightIntervals],
 ];
 const cell=v=>v==null||v===''||Number.isNaN(v)?'—':(typeof v==='number'?(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1)):String(v));
+// ---- 訓練趨勢（小倍數）-------------------------------------------------
+// 四個量的尺度完全不同（步頻 ~180、觸地 ~300ms、差異 ~5%、膝角 ~175°），
+// 所以是四張共用 x 軸的小圖，不是一張雙 y 軸的圖。雙軸會讓兩條線的交叉
+// 看起來像有意義，實際上只是兩個刻度湊巧對上。
+const SERIES_LEFT='#0d9488',SERIES_RIGHT='#7c3aed',SERIES_SOLO='#334155';
+const TREND_PANELS=[
+ {title:'步頻',unit:'步/分',series:[{key:'cadenceSpm',label:'步頻',color:SERIES_SOLO}]},
+ {title:'觸地時間',unit:'ms',series:[{key:'contactMsLeft',label:'左',color:SERIES_LEFT},
+                                     {key:'contactMsRight',label:'右',color:SERIES_RIGHT}]},
+ {title:'左右差異',unit:'%',series:[{key:'contactAsymmetryPct',label:'左右差異',color:SERIES_SOLO}]},
+ {title:'支撐期最小膝角',unit:'°',series:[{key:'minLeftKneeSupport',label:'左',color:SERIES_LEFT},
+                                          {key:'minRightKneeSupport',label:'右',color:SERIES_RIGHT}]},
+];
+const PANEL_H=92,TREND_TOP=18,TREND_GAP=26,TREND_L=52,TREND_R=34,AXIS_H=30;
+const trendState={rows:[],hover:null};
+const niceRange=vals=>{
+ const lo=Math.min(...vals),hi=Math.max(...vals);
+ if(!(hi>lo))return [lo-1,hi+1];
+ const pad=(hi-lo)*0.18;return [lo-pad,hi+pad];
+};
+function trendX(i,n,w){const span=w-TREND_L-TREND_R;return n<=1?TREND_L+span/2:TREND_L+span*i/(n-1);}
+function panelTop(p){return TREND_TOP+p*(PANEL_H+TREND_GAP);}
+function drawTrend(){
+ const canvas=$('trendChart');if(!canvas)return;
+ const rows=trendState.rows,n=rows.length;
+ const dpr=devicePixelRatio||1,w=canvas.clientWidth||600,h=TREND_TOP+TREND_PANELS.length*(PANEL_H+TREND_GAP)+AXIS_H;
+ canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
+ const c=canvas.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);
+ c.clearRect(0,0,w,h);c.fillStyle='#fbfdff';c.fillRect(0,0,w,h);
+ if(!n)return;
+ TREND_PANELS.forEach((panel,p)=>{
+  const top=panelTop(p),bottom=top+PANEL_H;
+  const vals=panel.series.flatMap(sr=>rows.map(r=>r[sr.key]).filter(Number.isFinite));
+  c.font='11px system-ui';c.fillStyle='#0f172a';c.textAlign='left';
+  c.fillText(`${panel.title}（${panel.unit}）`,TREND_L,top-6);
+  if(!vals.length){c.fillStyle='#94a3b8';c.fillText('尚無資料',TREND_L,top+PANEL_H/2);return;}
+  const [lo,hi]=niceRange(vals),y=v=>bottom-(v-lo)/(hi-lo)*PANEL_H;
+  // 座標線收斂：只畫上下兩條，中間留給資料
+  c.strokeStyle='#eef2f6';c.lineWidth=1;
+  for(const v of [lo,hi]){c.beginPath();c.moveTo(TREND_L,y(v));c.lineTo(w-TREND_R,y(v));c.stroke();}
+  c.fillStyle='#94a3b8';c.textAlign='right';c.font='10px ui-monospace,monospace';
+  c.fillText(hi.toFixed(hi<20?1:0),TREND_L-6,y(hi)+4);
+  c.fillText(lo.toFixed(lo<20?1:0),TREND_L-6,y(lo)+4);
+  c.textAlign='left';
+  for(const sr of panel.series){
+   c.strokeStyle=sr.color;c.lineWidth=2;c.beginPath();let started=false;
+   rows.forEach((r,i)=>{const v=r[sr.key];if(!Number.isFinite(v)){started=false;return;}
+    const px=trendX(i,n,w),py=y(v);started?c.lineTo(px,py):c.moveTo(px,py);started=true;});
+   c.stroke();
+   rows.forEach((r,i)=>{const v=r[sr.key];if(!Number.isFinite(v))return;
+    const px=trendX(i,n,w),py=y(v);
+    c.beginPath();c.arc(px,py,4,0,Math.PI*2);
+    // 連續率低的那一次，點畫成空心並鑲警示色：數字在，但別當成可靠的一點
+    if(r.lowTrust){c.fillStyle='#fbfdff';c.fill();c.strokeStyle='#b45309';c.lineWidth=2;c.stroke();}
+    else{c.fillStyle=sr.color;c.fill();c.strokeStyle='#fbfdff';c.lineWidth=2;c.stroke();}
+   });
+   if(panel.series.length>1){
+    const last=[...rows].reverse().find(r=>Number.isFinite(r[sr.key]));
+    if(last){const i=rows.lastIndexOf(last);
+     c.fillStyle=sr.color;c.font='10px system-ui';c.textAlign='left';
+     c.fillText(sr.label,Math.min(trendX(i,n,w)+7,w-TREND_R-12),y(last[sr.key])+3);}
+   }
+  }
+ });
+ const axisY=panelTop(TREND_PANELS.length-1)+PANEL_H;
+ c.fillStyle='#94a3b8';c.font='10px ui-monospace,monospace';c.textAlign='center';
+ const step=Math.max(1,Math.ceil(n/6));
+ rows.forEach((r,i)=>{if(i%step&&i!==n-1)return;
+  const px=trendX(i,n,w);
+  c.textAlign=i===0?'left':i===n-1?'right':'center';
+  c.fillText(r.label||'',px,axisY+18);});
+ c.textAlign='left';
+ if(trendState.hover!=null&&rows[trendState.hover]){
+  const px=trendX(trendState.hover,n,w);
+  c.strokeStyle='#ef4444';c.lineWidth=1;c.setLineDash([3,3]);
+  c.beginPath();c.moveTo(px,TREND_TOP-10);c.lineTo(px,axisY);c.stroke();c.setLineDash([]);
+ }
+}
+function trendTooltip(i){
+ const r=trendState.rows[i];if(!r)return;
+ const line=(k,u)=>Number.isFinite(r[k])?`${r[k].toFixed(1)}${u}`:'—';
+ $('trendTip').innerHTML=`<strong>${escapeHtml(r.label||'')}</strong>`
+  +`<span>步頻 ${line('cadenceSpm','')} 步/分</span>`
+  +`<span>觸地 左 ${line('contactMsLeft','')} ／ 右 ${line('contactMsRight','')} ms</span>`
+  +`<span>左右差異 ${line('contactAsymmetryPct','')}%</span>`
+  +`<span>支撐期膝角 左 ${line('minLeftKneeSupport','')} ／ 右 ${line('minRightKneeSupport','')}°</span>`
+  +(r.lowTrust?'<span class="tipWarn">此次追蹤連續率偏低，數值不可靠</span>':'');
+ $('trendTip').hidden=false;
+}
+function buildTrend(list){
+ trendState.rows=list.map(r=>({
+  label:r.settings?.date||String(r.created||'').slice(5,10),
+  cadenceSpm:r.summary?.cadenceSpm, contactMsLeft:r.summary?.contactMsLeft,
+  contactMsRight:r.summary?.contactMsRight, contactAsymmetryPct:r.summary?.contactAsymmetryPct,
+  minLeftKneeSupport:r.summary?.minLeftKneeSupport, minRightKneeSupport:r.summary?.minRightKneeSupport,
+  lowTrust:Number.isFinite(r.summary?.continuity)&&r.summary.continuity<0.7,
+ }));
+ const shaky=trendState.rows.filter(r=>r.lowTrust).length;
+ $('trendNote').textContent=trendState.rows.length
+  ? `${trendState.rows.length} 次分析，由舊到新。`+(shaky?`其中 ${shaky} 次追蹤連續率低於 70%，以空心圈標示——那幾點的數值不可靠，不要拿來判斷趨勢。`:'四個量的尺度不同，所以分成四張共用時間軸的小圖，不是疊在一起。')
+  : '';
+ drawTrend();
+}
+const trendCanvas=()=>$('trendChart');
+addEventListener('resize',()=>drawTrend());
 function renderRecords(){
  // 由舊到新排序：趨勢要從左往右讀，倒序看不出變化方向。
  const list=readRecords().slice().sort((a,b)=>String(a.created).localeCompare(String(b.created)));
- if(!list.length){$('recordList').innerHTML='<p class="muted">尚無本機紀錄。每完成一次分析會自動存一筆。</p>';return;}
+ if(!list.length){$('recordList').innerHTML='<p class="muted">尚無本機紀錄。每完成一次分析會自動存一筆。</p>';buildTrend([]);return;}
+ buildTrend(list);
  const head=RECORD_COLUMNS.map(c=>`<th>${c[1]}</th>`).join('');
  const rows=list.map(r=>`<tr>${RECORD_COLUMNS.map(c=>{
    const v=c[2](r);return `<td>${escapeHtml(cell(v))}</td>`;}).join('')}</tr>`).join('');
@@ -502,3 +608,22 @@ function fmtAngle(v,b){if(v==null)return '—';return `${v.toFixed(1)}°${b&&b.l
 function num(v){return Number.isFinite(v)?v.toFixed(1):'—';}
 function escapeHtml(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 updateControls();drawChart();addEventListener('resize',()=>drawChart());document.documentElement.dataset.appReady='true';ensureAi().catch(()=>{});
+
+(function(){
+ const canvas=$('trendChart');if(!canvas)return;
+ const nearest=e=>{
+  const n=trendState.rows.length;if(!n)return null;
+  const rect=canvas.getBoundingClientRect(),w=rect.width;
+  let best=0,bd=Infinity;
+  for(let i=0;i<n;i++){const d=Math.abs((e.clientX-rect.left)-trendX(i,n,w));if(d<bd){bd=d;best=i;}}
+  return best;
+ };
+ const move=e=>{const i=nearest(e);if(i==null)return;
+  trendState.hover=i;drawTrend();trendTooltip(i);
+  const rect=canvas.getBoundingClientRect(),tip=$('trendTip');
+  tip.style.left=`${Math.min(Math.max(e.clientX-rect.left+12,8),rect.width-tip.offsetWidth-8)}px`;
+  tip.style.top=`${Math.min(e.clientY-rect.top+12,rect.height-tip.offsetHeight-8)}px`;};
+ canvas.addEventListener('pointermove',move);
+ canvas.addEventListener('pointerdown',move);
+ canvas.addEventListener('pointerleave',()=>{trendState.hover=null;$('trendTip').hidden=true;drawTrend();});
+})();

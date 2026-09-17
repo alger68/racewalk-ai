@@ -118,6 +118,21 @@ steps over clip length, which would count the incomplete cycles at each end. Bel
 complete contacts the panel says so instead of computing from one or two steps. The 10%
 asymmetry mark is a prompt to look, not a calibrated threshold.
 
+## Trend chart
+
+Four measures on incompatible scales — cadence around 180, contact around 300 ms,
+asymmetry a few percent, knee angle near 175° — so the records tab draws four small
+multiples sharing one time axis rather than one chart with two y-scales, where a
+crossing of two lines would look like it meant something. A crosshair and tooltip read
+every measure for the hovered session at once.
+
+A session whose continuity fell below 70% is drawn as a hollow amber-ringed point and
+counted in the caption: its numbers are present but not to be read as part of the
+trend. The left/right series colours are the ones the angle chart already uses, so a
+foot keeps its colour across the app; the previous teal failed the palette validator's
+chroma floor (it reads as grey) and moved one step to `#0d9488`, which passes all six
+checks, including a CVD separation of ΔE 21 against the purple.
+
 ## Self-diagnosis
 
 `diagnoseCapture` in `site/core.js` reads a finished report's own summary and says
