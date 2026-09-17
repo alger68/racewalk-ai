@@ -31,7 +31,9 @@ jobs:
           node tests/gait.test.mjs | tee test-results/gait.txt
           node tests/target-lock.test.mjs | tee test-results/target-lock.txt
           node tests/continuity.test.mjs | tee test-results/continuity.txt
-          for file in site/*.js; do node --check "$file"; done
+          # 以模組語義檢查：node --check 對 .js 用 script 語義，
+          # 模組裡的重複宣告（例如兩個同名 function）不會被抓出來。
+          for file in site/*.js; do cp "$file" "/tmp/modcheck.mjs"; node --check /tmp/modcheck.mjs || { echo "module parse failed: $file"; exit 1; }; done
           python -m py_compile tests/browser_smoke.py tests/cache_smoke.py
       - name: Build pinned SDK and model
         run: |

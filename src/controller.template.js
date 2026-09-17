@@ -425,7 +425,77 @@ $('exportHtml').onclick=()=>{if(!state.report)return;download(`racewalk-${$('dat
 function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function readRecords(){try{const v=JSON.parse(localStorage.getItem('racewalk-v3-records')||'[]');return Array.isArray(v)?v:[];}catch{return [];}}
 function saveRecord(){if(!state.report)return;try{const list=readRecords();list.unshift({created:state.report.created,settings:state.report.settings,summary:state.report.summary,targetSelection:state.report.targetSelection,trackingStop:state.report.trackingStop});localStorage.setItem('racewalk-v3-records',JSON.stringify(list.slice(0,50)));}catch{$('recordList').textContent='此瀏覽器無法保存本機紀錄；請匯出 JSON 保存分析結果。';}}
-function renderRecords(){const list=readRecords();$('recordList').innerHTML=list.length?list.map(x=>`<div class="record"><strong>${escapeHtml(x.settings?.athlete||'')}</strong> · ${escapeHtml(x.settings?.date||'')} · ${escapeHtml(x.targetSelection?.id||'舊紀錄')}</div>`).join(''):'<p class="muted">尚無本機紀錄。</p>';}
+const RECORD_COLUMNS=[
+ ['date','日期',r=>r.settings?.date||(r.created||'').slice(0,10)],
+ ['athlete','選手',r=>r.settings?.athlete||''],
+ ['sampleFps','取樣fps',r=>r.settings?.sampleFps],
+ ['continuity','連續率%',r=>r.summary?.continuity==null?null:r.summary.continuity*100],
+ ['cadenceSpm','步頻',r=>r.summary?.cadenceSpm],
+ ['contactLeftMs','觸地左ms',r=>r.summary?.contactMsLeft],
+ ['contactRightMs','觸地右ms',r=>r.summary?.contactMsRight],
+ ['contactAsymmetryPct','左右差異%',r=>r.summary?.contactAsymmetryPct],
+ ['kneeLeftDeg','左膝支撐最小',r=>r.summary?.minLeftKneeSupport],
+ ['kneeRightDeg','右膝支撐最小',r=>r.summary?.minRightKneeSupport],
+ ['completeContacts','完整觸地',r=>r.summary?.completeContacts],
+ ['provableFlights','可證明騰空',r=>r.summary?.flightIntervals],
+];
+const cell=v=>v==null||v===''||Number.isNaN(v)?'—':(typeof v==='number'?(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1)):String(v));
+function renderRecords(){
+ // 由舊到新排序：趨勢要從左往右讀，倒序看不出變化方向。
+ const list=readRecords().slice().sort((a,b)=>String(a.created).localeCompare(String(b.created)));
+ if(!list.length){$('recordList').innerHTML='<p class="muted">尚無本機紀錄。每完成一次分析會自動存一筆。</p>';return;}
+ const head=RECORD_COLUMNS.map(c=>`<th>${c[1]}</th>`).join('');
+ const rows=list.map(r=>`<tr>${RECORD_COLUMNS.map(c=>{
+   const v=c[2](r);return `<td>${escapeHtml(cell(v))}</td>`;}).join('')}</tr>`).join('');
+ $('recordList').innerHTML=`<div class="tscroll"><table class="records"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`
+  +`<p class="muted">共 ${list.length} 筆，由舊到新。同一位選手要比較的是<strong>趨勢</strong>，不是任何單筆數值；單筆量測的可信度見該次分析的「這份結果可信嗎」。</p>`;
+}
+const stamp=()=>new Date().toISOString().slice(0,10);
+function exportJson(){
+ const list=readRecords();
+ if(!list.length){$('recordStatus').textContent='沒有紀錄可匯出。';return;}
+ download(`racewalk-records-${stamp()}.json`,
+  JSON.stringify({schema:'racewalk-records/1',exported:new Date().toISOString(),records:list},null,2),
+  'application/json');
+ $('recordStatus').textContent=`已匯出 ${list.length} 筆 JSON。`;
+}
+function exportCsv(){
+ const list=readRecords().slice().sort((a,b)=>String(a.created).localeCompare(String(b.created)));
+ if(!list.length){$('recordStatus').textContent='沒有紀錄可匯出。';return;}
+ const esc=v=>{const s=v==null?'':String(v);return /[",\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s;};
+ const lines=[RECORD_COLUMNS.map(c=>c[0]).join(',')];
+ for(const r of list) lines.push(RECORD_COLUMNS.map(c=>esc(c[2](r))).join(','));
+ // BOM：沒有它 Excel 會把中文欄位讀成亂碼
+ download(`racewalk-records-${stamp()}.csv`,'﻿'+lines.join('\n'),'text/csv;charset=utf-8');
+ $('recordStatus').textContent=`已匯出 ${list.length} 筆 CSV，可直接用試算表開啟。`;
+}
+function importJson(file){
+ const reader=new FileReader();
+ reader.onerror=()=>{$('recordStatus').textContent='讀取檔案失敗。';};
+ reader.onload=()=>{
+  let incoming;
+  try{
+   const parsed=JSON.parse(String(reader.result));
+   incoming=Array.isArray(parsed)?parsed:parsed?.records;
+  }catch{ $('recordStatus').textContent='這不是有效的 JSON 檔。'; return; }
+  if(!Array.isArray(incoming)){$('recordStatus').textContent='檔案裡找不到紀錄陣列（預期 records 欄位）。';return;}
+  const valid=incoming.filter(r=>r&&typeof r==='object'&&r.summary);
+  if(!valid.length){$('recordStatus').textContent='檔案裡沒有可用的紀錄（每筆需含 summary）。';return;}
+  // 以 created 去重：重複匯入同一個檔不該讓紀錄變兩倍。
+  const existing=readRecords(),seen=new Set(existing.map(r=>r.created));
+  const added=valid.filter(r=>!seen.has(r.created));
+  const merged=[...added,...existing].sort((a,b)=>String(b.created).localeCompare(String(a.created))).slice(0,200);
+  try{
+   localStorage.setItem('racewalk-v3-records',JSON.stringify(merged));
+   renderRecords();
+   $('recordStatus').textContent=`匯入 ${valid.length} 筆，其中 ${added.length} 筆是新的（重複的 ${valid.length-added.length} 筆已略過）。`;
+  }catch{ $('recordStatus').textContent='本機儲存寫入失敗，紀錄未變更。'; }
+ };
+ reader.readAsText(file);
+}
+$('exportJsonBtn').onclick=exportJson;
+$('exportCsvBtn').onclick=exportCsv;
+$('importInput').addEventListener('change',e=>{const f=e.target.files?.[0];if(f)importJson(f);e.target.value='';});
 $('clearRecords').onclick=()=>{if(confirm('確定清除本機訓練紀錄？')){try{localStorage.removeItem('racewalk-v3-records');renderRecords();}catch{$('recordList').textContent='本機儲存不可用。';}}};
 function formatTime(s){if(!Number.isFinite(s))return '00:00.000';const m=Math.floor(s/60),sec=s-m*60;return `${String(m).padStart(2,'0')}:${sec.toFixed(3).padStart(6,'0')}`;}
 function fmtAngle(v,b){if(v==null)return '—';return `${v.toFixed(1)}°${b&&b.low!=null?` [${b.low.toFixed(1)}–${b.high.toFixed(1)}]`:''}`;}

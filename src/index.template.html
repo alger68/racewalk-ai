@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="./styles.css?v=3.0.4"><link rel="stylesheet" href="./runtime-fix.css?v=3.0.4">
 </head><body>
 <header class="topbar"><div><div class="eyebrow">RACEWALK LAB 3.0.4 · CHATGPT REBUILD</div><h1>競走動作分析</h1></div><div class="badges"><span id="engineBadge">正在啟動程式</span><span>影片只在本機處理</span></div></header>
-<nav class="tabs" aria-label="主選單"><button class="tab active" data-tab="analyze">分析工作台</button><button class="tab" data-tab="report">本次報告</button><button class="tab" data-tab="records">訓練紀錄</button><button class="tab" data-tab="guide">拍攝指南</button></nav>
+<nav class="tabs" aria-label="主選單"><button class="tab active" data-tab="analyze">分析工作台</button><button class="tab" data-tab="report">本次報告</button><button class="tab" data-tab="records">訓練紀錄</button><button class="tab" data-tab="learn">怎麼看數據</button><button class="tab" data-tab="guide">拍攝指南</button></nav>
 <main><section id="analyze" class="panel active"><div class="grid two">
 <article class="card controls"><h2>01 本次拍攝</h2><div class="formgrid">
 <label>選手<input id="athlete" placeholder="選手姓名或代號"></label><label>日期<input id="date" type="date"></label>
@@ -24,7 +24,69 @@
 <div class="ground"><label>地面線 <input id="groundSlider" type="range" min="0.45" max="0.98" value="0.9" step="0.001"></label><span id="groundText">自動/待分析</span></div></article></div>
 <div class="grid two lower"><article class="card"><div class="viewerHead"><h2>03 角度曲線＋點位誤差帶</h2><div id="angleNow" class="metricInline">L — / R —</div></div><canvas id="chart" height="300"></canvas></article><article class="card"><div class="viewerHead"><h2>04 快速判讀</h2><span id="quickTarget" class="metricInline"></span></div><div id="verdict" class="verdict"></div><div id="coach" class="coach"></div><div id="quickStats" class="stats"></div><div id="diagnosis" class="diagnosis"></div><div id="events" class="events"></div><details class="selftest"><summary>核心自我測試</summary><p class="muted">對量測核心跑隨機輸入，檢查數值不變式。這是開發用的自我檢查，與本次影片無關。</p><button id="monkeyBtn">核心隨機測試 1000 次</button><pre id="monkeyResult" class="testResult"></pre></details></article></div></section>
 <section id="report" class="panel"><article class="card"><div class="viewerHead"><h2>本次報告</h2><div class="actions compact"><button id="exportJson">JSON</button><button id="exportCsv">CSV</button><button id="exportHtml">HTML/列印</button></div></div><div id="reportBody" class="reportBody"><p>完成分析後會產生本次報告。</p></div></article></section>
-<section id="records" class="panel"><article class="card"><div class="viewerHead"><h2>訓練紀錄</h2><button id="clearRecords">清除本機紀錄</button></div><p class="muted">只保存分析摘要與設定，不保存影片內容。</p><div id="recordList"></div></article></section>
+<section id="records" class="panel"><article class="card"><div class="viewerHead"><h2>訓練紀錄</h2><button id="clearRecords">清除本機紀錄</button></div><p class="muted">只保存分析摘要與設定，<strong>不保存影片內容</strong>。紀錄存在這台裝置的瀏覽器裡——換裝置、清快取或換瀏覽器就會不見，所以請定期匯出。</p><div class="actions compact"><button id="exportCsvBtn">匯出 CSV（試算表）</button><button id="exportJsonBtn">匯出 JSON（備份／換裝置）</button><label class="importLabel">匯入 JSON<input id="importInput" type="file" accept="application/json,.json"></label></div><p id="recordStatus" class="status" role="status"></p><div id="recordList"></div></article></section>
+<section id="learn" class="panel">
+<article class="card prose"><h2>每個數字是什麼意思</h2>
+<p class="lead">讀數據的第一件事不是看數字大小，是<strong>先看那個數字能不能信</strong>。「04 快速判讀」最上面那行結論就是在講這個；它說不能用，下面的數字就不要拿去跟選手討論。</p>
+<table><thead><tr><th>數字</th><th>它在講什麼</th><th>怎麼用</th></tr></thead><tbody>
+<tr><td><strong>追蹤連續率</strong></td><td>整段影片裡，指定選手被可靠配對到的影格比例。</td><td>這是所有其他數字的地基。低於 70% 時，下面每一項都要打折扣看。</td></tr>
+<tr><td><strong>步頻</strong>（步/分）</td><td>相鄰兩次觸地起點間隔的中位數換算。</td><td>配速變快時，是靠步頻還是步長？兩者的訓練方向完全不同。跟自己的基線比。</td></tr>
+<tr><td><strong>觸地時間 左／右</strong></td><td>單腳從觸地到離地的平均長度，只採計兩端都觀察到離地的完整觸地。</td><td>疲勞時通常變長。左右哪一邊系統性偏長，值得注意。</td></tr>
+<tr><td><strong>左右差異 %</strong></td><td>左右觸地時間的差，除以兩者平均。0% 完全對稱。</td><td><strong>跟自己上週比，不是跟別人比。</strong>本來 4% 變成 12% 才是訊號；單次的 8% 本身不說明什麼。</td></tr>
+<tr><td><strong>支撐期最小膝角</strong></td><td>從觸地到通過身體垂直位置，膝角的最小值。這是 TR54 彎膝規則唯一管的區間。</td><td>合格選手應接近伸直。量到明顯偏小時先懷疑機位，不是先懷疑選手。</td></tr>
+<tr><td><strong>可證明的騰空區間</strong></td><td>雙腳同時離地、而且長度證明得出來的區段。</td><td><strong>沒有標記不等於沒有騰空</strong>，只代表這支影片證明不了。</td></tr>
+</tbody></table>
+<p class="muted">所有「支撐期」「騰空」的定義來自 World Athletics TR54；工具只量對應的物理量，不做判定。</p>
+</article>
+
+<article class="card prose"><h2>每天怎麼記錄</h2>
+<ol>
+<li><strong>拍攝條件固定下來。</strong>同一個機位、同一個距離、同樣的取樣 fps。條件變了就不能比。</li>
+<li><strong>每次分析完自動存一筆</strong>到「訓練紀錄」，包含步頻、觸地時間、左右差異、膝角。</li>
+<li><strong>在「本次拍攝」填選手與日期</strong>——紀錄表靠這兩欄辨識，沒填就比不出誰是誰。</li>
+<li><strong>每週匯出一次 CSV</strong>。紀錄存在這台裝置的瀏覽器裡，換裝置或清快取就沒了。</li>
+<li><strong>換裝置用 JSON 匯出／匯入</strong>，以時間戳去重，重複匯入同一個檔不會變成兩倍。</li>
+</ol>
+<p><strong>一場比賽要拍幾段？</strong>工具一次分析 10–15 秒，但一場 3000 公尺競走大約 15–18 分鐘。固定在幾個點各拍一段——<strong>起跑後、1000m、2000m、最後 500m</strong>——然後比較同一場內的變化。疲勞有沒有讓技術跑掉、左右有沒有失衡，答案在那個對照裡，不在任何單一段影片裡。</p>
+</article>
+
+<article class="card prose"><h2>競走這項運動：查證過的事實</h2>
+<h3>比賽距離</h3>
+<table><thead><tr><th>組別</th><th>距離</th><th>查證狀態</th></tr></thead><tbody>
+<tr><td>國小男生／女生</td><td>3000 公尺競走</td><td>✔ 臺灣田徑資訊站有獨立紀錄頁</td></tr>
+<tr><td><strong>國中組</strong></td><td><strong>未確認</strong></td><td>⚠ 請查當年度<strong>全中運田徑技術手冊</strong>的競賽項目表</td></tr>
+<tr><td>全中運高男組</td><td>5000 公尺競走（大會紀錄 22:25.62，羅聖欽／陽明高中／2023-04-26）</td><td>✔ 全中運大會最高紀錄表</td></tr>
+<tr><td>World Athletics U20</td><td>10 公里競走</td><td>✔</td></tr>
+</tbody></table>
+<p class="muted">國中組的距離我們查不到公開來源，<strong>所以這裡不填</strong>。距離決定訓練結構，不該用推測的。查到之後請以技術手冊為準。</p>
+
+<h3>為什麼競走的傷跟跑步不一樣</h3>
+<p>直覺會以為「沒有騰空＝衝擊小＝不容易受傷」。<strong>前半對，後半不對。</strong></p>
+<ul>
+<li><strong>單步衝擊確實較低</strong>：快走的垂直地面反作用力峰值明顯低於跑步，跑步是體重的 1.5–3 倍。</li>
+<li><strong>但傷害並不少，而且型態不同</strong>：一份 682 位競走者的調查中，膝 107 例、足 104 例、脛 64 例；最常報告的是<strong>脛部疼痛</strong>與<strong>高位腿後肌拉傷</strong>。</li>
+<li><strong>機制</strong>：膝必須打直，落地時無法靠屈膝吸震，負荷轉向髖、骨盆與下背；脛前肌為維持腳尖上勾而長時間收縮，被認為是脛痛的直接來源；骨盆大幅旋轉是地面反作用力的主要來源之一。</li>
+<li><strong>循環次數</strong>：3000 公尺競走約 15–18 分鐘，以 180–200 步/分估算約 <strong>3000 步</strong>；同距離跑步約 1900 步，800 公尺跑約 500 步。</li>
+</ul>
+<p><strong>結論：低衝擊、高重複、關節角度不尋常。</strong>屬於累積型負荷，不是撞擊型。這也是為什麼「左右對稱」和「觸地時間隨時間變化」值得每天看。</p>
+
+<h3>未成年選手</h3>
+<p>13–15 歲處於生長高峰，<strong>生長板與骨突比肌腱韌帶更脆弱</strong>（跟骨、脛骨粗隆、髂嵴），成長陡增期間傷害風險本就升高。</p>
+<p class="muted"><strong>本工具不提供訓練處方。</strong>訓練量的決定需要看得到選手本人的人——生長階段、既往傷、目前訓練量、身體回饋。那是教練與運動醫學／防護人員的工作。本工具能做的是提供可追蹤的客觀量測，讓那些決定有依據。</p>
+</article>
+
+<article class="card prose"><h2>出處</h2>
+<ul>
+<li><a href="https://www.researchgate.net/publication/7219758_Injuries_in_the_Sport_of_Racewalking" target="_blank" rel="noopener">Injuries in the Sport of Racewalking</a></li>
+<li><a href="https://www.intechopen.com/chapters/1219032" target="_blank" rel="noopener">The Key Biomechanical Parameters for Prevention of Injuries in Race Walking</a></li>
+<li><a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9981938/" target="_blank" rel="noopener">Ground reaction force and EMG of lower limb muscles during fast walking</a></li>
+<li><a href="https://www.hmpgloballearningnetwork.com/site/podiatry/case-study/racewalking-key-lower-extremity-concepts" target="_blank" rel="noopener">Racewalking: Key Lower Extremity Concepts</a></li>
+<li><a href="https://info.taiwanathletics.com/elementaryschool-women-3000mw-top10/" target="_blank" rel="noopener">國小女生 3000 公尺競走歷年十傑 — 臺灣田徑資訊站</a></li>
+<li><a href="https://www.ctssf.org.tw/files/message/1345/%E5%85%A8%E4%B8%AD%E9%81%8B%E5%A4%A7%E6%9C%83%E6%9C%80%E9%AB%98%E7%B4%80%E9%8C%84(%E4%BF%AE%E8%A8%82112%E5%B9%B4%E6%9C%80%E9%AB%98%E7%B4%80%E9%8C%84)1120619.pdf" target="_blank" rel="noopener">全中運大會最高紀錄（含高男 5000 公尺競走）</a></li>
+</ul>
+<p class="muted">以上為第三方研究與統計，非本工具的量測結果。傷害流行病學的數字來自特定族群調查，不等於任何個別選手的風險。</p>
+</article>
+</section>
 <section id="guide" class="panel">
 <article class="card prose"><h2>拍攝規格</h2>
 <p class="lead">騰空只有 <strong>20–40 毫秒</strong>，幀率決定這個工具的上限。預算優先順序是<strong>幀率 &gt; 快門 &gt; 解析度</strong>。4K@30fps 對本專案毫無用處。</p>

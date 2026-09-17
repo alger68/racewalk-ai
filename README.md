@@ -139,6 +139,26 @@ calibrated against real footage. `node tests/diagnose.test.mjs` covers the wordi
 well as the branching, including that an early loss of tracking is only attributed to a
 bad seed skeleton when continuity is also low.
 
+## Records, export and the reading guide
+
+Records are per-session summaries in this browser's local storage, so the records tab
+lists them oldest first — a trend read left to right — and exports to CSV for a
+spreadsheet or JSON for moving between devices. Import merges by timestamp, so
+re-importing the same file does not double the history. The tab says plainly that
+clearing site data loses everything, because local storage is not a backup.
+
+A 怎麼看數據 tab explains what each number means, when not to trust it, and how to
+record day to day, alongside what we could verify about the sport: race-walk distances
+with their sources, the injury mechanism that follows from the straight-knee rule, and
+a sampling protocol for a race that lasts far longer than one clip. The junior-high
+distance is left blank and marked unverified rather than guessed, because distance
+decides training structure.
+
+`node --check` parses a `.js` file with script semantics, where a duplicate function
+declaration is legal; it is an error in a module. A duplicate `download` therefore
+passed the check and broke the page at load. Both the local check and CI now parse
+site scripts as modules.
+
 ## Documentation
 
 `docs/PLAN.md` is the current plan: what the tool is now, what is blocked on real
