@@ -386,8 +386,9 @@ function renderQuick(){if(!state.report)return;const s=state.report.summary;
  $('quickTarget').textContent=`指定選手 ${state.report.targetSelection?.id||'—'} · 取樣 ${state.report.settings?.sampleFps??'—'} fps · ${s.frames} 格`;
  $('events').innerHTML=(()=>{
   const all=state.report.flights||[],provable=all.filter(e=>e.lowerMs>0),weak=all.length-provable.length;
-  const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · 至少 ${e.lowerMs.toFixed(0)} ms${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join('');
-  const note=weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'';
+  const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · <strong>至少 ${e.lowerMs.toFixed(0)} ms</strong>${Number.isFinite(e.estimateMs)?` <em class="estimate">估計 ${e.estimateMs.toFixed(0)} ms</em>`:''}${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join('');
+  const note=(weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'')
+   +(provable.some(e=>Number.isFinite(e.estimateMs))?'<p class="muted"><strong>粗體是嚴謹下界</strong>：真實騰空一定不短於它。「估計」是兩端做次影格內插的結果，較接近真值但<strong>系統性偏低</strong>（門檻帶有寬度，兩端各吃掉一段），而且提高幀率不會讓這個偏差消失。判定只採信下界。</p>':'');
   return rows?rows+note:`<p class="muted">未標記可證明的雙腳離地；這是「沒有證明」，不是「沒有騰空」。${weak?`（有 ${weak} 段單格觀測不構成證據。）`:''}</p>`;
 })();document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
 function coachStat(k,v,unit,level){

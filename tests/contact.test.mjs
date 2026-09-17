@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {contactStates,flightIntervals,lowpass,residualNoise,fillGaps,footHeights,
-        supportKnee,verticalSupportIndex,runsOf,angleDeg,MIN_SWING_MS,
+        supportKnee,verticalSupportIndex,runsOf,angleDeg,MIN_SWING_MS,contactProfile,crossTime,
         judgeDetection,DETECTION_BANDS} from '../site/core.js';
 
 let cases=0;const check=(name,fn)=>{fn();cases++;console.log('PASS',name);};
@@ -299,6 +299,71 @@ check('支撐期的 index 與 time 描述同一格',()=>{
     assert.equal(f[phase.contactEndIndex].t,phase.contactEndTime);
     assert.ok(phase.endIndex<=phase.contactEndIndex,'取值窗不會超出觸地期');
   }
+});
+
+// ---------------------------------------------------- 次影格估計
+// 估計值與嚴謹界線是兩種東西，測試要守住它們的關係，而不是宣稱估計很準。
+
+check('估計值永遠不低於嚴謹下界',()=>{
+  for(const fps of [30,60,120,240])for(const flightMs of [30,45,60,120]){
+    const g=gait({fps,flightMs});
+    for(const f of flightIntervals(g.frames,g.ground,fps)){
+      if(f.estimateMs==null)continue;
+      assert.ok(f.estimateMs>=f.lowerMs-1e-9,
+        `${fps}fps/${flightMs}ms：估計 ${f.estimateMs.toFixed(1)} 低於下界 ${f.lowerMs.toFixed(1)}`);
+    }
+  }
+});
+
+check('估計值比下界更接近真值',()=>{
+  let better=0,total=0;
+  for(const fps of [60,120,240])for(const flightMs of [45,60,80,120]){
+    const g=gait({fps,flightMs});
+    for(const f of flightIntervals(g.frames,g.ground,fps)){
+      if(f.estimateMs==null)continue;total++;
+      if(Math.abs(f.estimateMs-flightMs)<Math.abs(f.lowerMs-flightMs))better++;
+    }
+  }
+  assert.ok(total>0);
+  assert.equal(better,total,`${total} 個案例中只有 ${better} 個更接近`);
+});
+
+check('估計值系統性偏低——門檻帶有寬度，兩端各吃掉一段',()=>{
+  // 這不是缺陷報告，是把已知性質釘住：估計是偏低的，不可以當成上界用。
+  for(const fps of [60,120,240])for(const flightMs of [45,60,80]){
+    const g=gait({fps,flightMs});
+    for(const f of flightIntervals(g.frames,g.ground,fps)){
+      if(f.estimateMs==null)continue;
+      assert.ok(f.estimateMs<flightMs,
+        `${fps}fps/${flightMs}ms：估計 ${f.estimateMs.toFixed(1)} 不該高於真值`);
+    }
+  }
+});
+
+check('偏低量由門檻帶決定，不隨幀率收斂',()=>{
+  // 實測發現：60/120/240fps 的平均絕對誤差都是 12.5 ms 左右。
+  // 提高幀率解決的是量化誤差，解決不了門檻帶造成的偏差——
+  // 這決定了「再買更快的相機」不會讓工具談得了 40–45ms 的決策帶。
+  const bias=fps=>{
+    const errs=[45,60,80,120].map(ms=>{
+      const g=gait({fps,flightMs:ms});
+      const es=flightIntervals(g.frames,g.ground,fps).map(f=>f.estimateMs).filter(Number.isFinite);
+      return es.length?es.reduce((a,b)=>a+b,0)/es.length-ms:null;
+    }).filter(x=>x!=null);
+    return errs.reduce((a,b)=>a+Math.abs(b),0)/errs.length;
+  };
+  const b120=bias(120),b240=bias(240);
+  assert.ok(b120>5,`120fps 的偏差應仍然存在，得到 ${b120.toFixed(1)}ms`);
+  assert.ok(Math.abs(b240-b120)<3,
+    `幀率加倍不該讓偏差明顯縮小：120fps ${b120.toFixed(1)}ms vs 240fps ${b240.toFixed(1)}ms`);
+});
+
+check('沒有跨過門檻時退回較接近的那一格，不外插',()=>{
+  const f=legFrames({});
+  const prof=contactProfile(f,'L',.9,30);
+  const t=crossTime(f,prof,.9,0,1);
+  assert.ok(t===null||(t>=f[0].t&&t<=f[1].t),`內插結果 ${t} 跑出兩格之外`);
+  assert.equal(crossTime(f,{series:[],band:.01,valid:[]},.9,0,1),null);
 });
 
 console.log(JSON.stringify({suite:'contact',cases,passed:true,

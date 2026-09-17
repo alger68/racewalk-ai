@@ -214,11 +214,12 @@ function cleanRuns(states, fps) {
 
 // 逐格接地狀態：'contact' | 'off' | 'unknown'。
 // 'unknown' 不可以當成 'off'——把「不知道」讀成「離地」會憑空生出騰空。
-export function contactStates(frames, side, groundY, fps, threshold = 0.018) {
+export function contactProfile(frames, side, groundY, fps, threshold = 0.018) {
   const n = (frames || []).length;
-  if (!n || groundY == null) return new Array(n).fill('unknown');
+  const blank = { states: new Array(n).fill('unknown'), series: new Array(n).fill(NaN), band: threshold, valid: new Array(n).fill(false) };
+  if (!n || groundY == null) return blank;
   const { y, valid } = footHeights(frames, side);
-  if (!valid.some(Boolean)) return new Array(n).fill('unknown');
+  if (!valid.some(Boolean)) return blank;
 
   let series = y, band = threshold;
   if (n >= SMOOTH_MIN_FRAMES) {
@@ -232,7 +233,29 @@ export function contactStates(frames, side, groundY, fps, threshold = 0.018) {
     const gap = groundY - v;
     return gap <= band && gap >= -band * 1.4 ? 'contact' : 'off';
   });
-  return n >= SMOOTH_MIN_FRAMES ? cleanRuns(states, fps) : states;
+  return { states: n >= SMOOTH_MIN_FRAMES ? cleanRuns(states, fps) : states, series, band, valid };
+}
+
+export function contactStates(frames, side, groundY, fps, threshold = 0.018) {
+  return contactProfile(frames, side, groundY, fps, threshold).states;
+}
+
+// 次影格的觸地／離地時刻：在跨越門檻的兩格之間，對平滑後的足部高度線性內插。
+//
+// ★ 這是**估計**，不是界線。取樣界線 lowerMs 的嚴謹性來自「只數觀察到的影格」，
+//   內插則依賴「兩格之間高度近似線性」這個假設。兩者永遠分開呈現，
+//   估計值不得取代 lowerMs，也不得用來宣稱證明了什麼。
+export function crossTime(frames, profile, groundY, a, b) {
+  const { series, band, valid } = profile;
+  if (!valid?.[a] || !valid?.[b]) return null;
+  const ga = groundY - series[a], gb = groundY - series[b];
+  if (!Number.isFinite(ga) || !Number.isFinite(gb)) return null;
+  const ta = frames[a].t, tb = frames[b].t;
+  if (!(tb > ta)) return null;
+  // 兩端沒有跨過門檻就沒有交點可插，退回較接近門檻的那一格
+  if ((ga - band) * (gb - band) > 0) return Math.abs(ga - band) <= Math.abs(gb - band) ? ta : tb;
+  const frac = (band - ga) / (gb - ga);
+  return ta + Math.min(1, Math.max(0, frac)) * (tb - ta);
 }
 
 export function footContact(landmarks, side, groundY, threshold = 0.018) {
@@ -301,10 +324,26 @@ export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
   const out = [], n = (frames || []).length;
   if (!n) return out;
   const dt = 1000 / Math.max(1, fps);
-  const L = contactStates(frames, 'L', groundY, fps, threshold);
-  const R = contactStates(frames, 'R', groundY, fps, threshold);
+  const pl = contactProfile(frames, 'L', groundY, fps, threshold);
+  const pr = contactProfile(frames, 'R', groundY, fps, threshold);
+  const L = pl.states, R = pr.states;
   const off = i => L[i] === 'off' && R[i] === 'off';
   const grounded = i => L[i] === 'contact' || R[i] === 'contact';
+  // 騰空始於「最後一隻腳離地」，終於「第一隻腳落地」。
+  const liftoff = start => {
+    const ts = [[L, pl], [R, pr]]
+      .filter(([st]) => st[start - 1] === 'contact' && st[start] === 'off')
+      .map(([, pf]) => crossTime(frames, pf, groundY, start - 1, start))
+      .filter(Number.isFinite);
+    return ts.length ? Math.max(...ts) : null;
+  };
+  const touchdown = end => {
+    const ts = [[L, pl], [R, pr]]
+      .filter(([st]) => st[end] === 'off' && st[end + 1] === 'contact')
+      .map(([, pf]) => crossTime(frames, pf, groundY, end, end + 1))
+      .filter(Number.isFinite);
+    return ts.length ? Math.min(...ts) : null;
+  };
 
   let i = 0;
   while (i < n) {
@@ -322,6 +361,11 @@ export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
       lowerMs: Math.max(0, (k - 1) * dt),  // 嚴謹下界
       upperMs: (k + 1) * dt,               // 估計值，非嚴謹上界（見上方說明）
       bounded: true,
+      // 估計值：兩端各做次影格內插。比下界接近真值，但不具嚴謹性。
+      estimateMs: (() => {
+        const a = liftoff(start), b = touchdown(end);
+        return Number.isFinite(a) && Number.isFinite(b) && b > a ? (b - a) * 1000 : null;
+      })(),
       detection: judgeDetection(Math.max(0, (k - 1) * dt)),
     });
   }

@@ -35,6 +35,22 @@ ground truth: compliant 30 ms flights produce no provable marking at 240/120/60/
 and 120 ms flights are provable at all four. Low frame rates lose sensitivity as missed
 detections, not false ones. None of this is measured accuracy on real video.
 
+## Sub-frame contact timing, and what it did not fix
+
+`flightIntervals` now also reports `estimateMs`, from linear interpolation of the
+smoothed foot height between the frames that bracket the threshold crossing. It is
+reported beside `lowerMs`, never instead of it: the bound is rigorous because it only
+counts observed frames, while the interpolation assumes the height is locally linear.
+
+Measuring it changed the roadmap. The estimate is closer to the truth than the bound,
+but it sits about 12 ms low and that error does not shrink with frame rate — 12.5 ms at
+60 fps, 12.6 at 120, 12.5 at 240. The contact band has width, so a foot must rise
+through it before it reads as airborne, and the same at landing; interpolation fixes
+quantisation, not the band. Reaching the 40–45 ms band judges actually decide on is
+therefore a contact-model problem, not a camera problem. No correction factor was
+fitted from the synthetic data — that would be fitting the simulation. The direction of
+the bias and its indifference to frame rate are held by tests.
+
 ## Judge-detection bands
 
 TR54 prohibits flight that is *visible to the human eye*, not flight as such —
