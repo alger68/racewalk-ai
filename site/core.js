@@ -320,6 +320,15 @@ export function judgeDetection(flightMs) {
 //
 // 前後必須是確定觸地這個條件不能省：若區段被 'unknown' 或序列端點夾住，
 // 騰空的起訖根本沒有被觀察到，連下界都失去依據——那段可能任意長。
+// 實際用到的觸地門檻帶。偏差量由它決定，所以它必須進報告——
+// 日後拿實拍校準時，要能把「量到的偏差」對回「當時的帶寬」。
+export function contactBandUsed(frames, groundY, fps, threshold = 0.018) {
+  const bands = ['L', 'R']
+    .map(side => contactProfile(frames, side, groundY, fps, threshold).band)
+    .filter(Number.isFinite);
+  return bands.length ? Math.max(...bands) : null;
+}
+
 export function flightIntervals(frames, groundY, fps, threshold = 0.018) {
   const out = [], n = (frames || []).length;
   if (!n) return out;
