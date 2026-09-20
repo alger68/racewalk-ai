@@ -386,7 +386,7 @@ function drawBand(key,color,w,h){const pts=state.frames.map(f=>({t:f.t,m:f.metri
 function buildReport(){
  if(!state.frames.length){state.report=null;return;}
  const gy=+$('groundSlider').value,fps=+$('sampleFps').value||30,flights=flightIntervals(state.frames,gy,fps),knee=supportKnee(state.frames,gy,fps),gait=gaitMetrics(state.frames,gy,fps),valid=state.frames.filter(f=>f.landmarks).length,l=state.frames.map(f=>f.metrics?.leftKnee?.value).filter(Number.isFinite),r=state.frames.map(f=>f.metrics?.rightKnee?.value).filter(Number.isFinite);
- state.report={schema:6,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,contactBand:contactBandUsed(state.frames,gy,fps),clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),cadenceSpm:gait.cadenceSpm,contactMsLeft:gait.contactMs.left,contactMsRight:gait.contactMs.right,contactAsymmetryPct:gait.asymmetry.contactPct,completeContacts:gait.completeContacts,manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,gait,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
+ state.report={schema:6,engine:state.version,created:new Date().toISOString(),targetSelection:state.runSelection,trackingStop:state.trackingStop,settings:{athlete:$('athlete').value,date:$('date').value,captureMode:$('captureMode').value,view:$('view').value,direction:$('direction').value,fps:+$('fps').value,sampleFps:fps,uncertaintyEnabled:$('uncertaintyEnabled').checked,pointSigmaPx:+$('sigmaPx').value,groundY:gy,contactBand:contactBandUsed(state.frames,gy,fps),clipSeconds:+$('clipSeconds').value},summary:{frames:state.frames.length,trackedFrames:valid,continuity:valid/state.frames.length,maxPeople:state.maxPeople,minLeftKneeSupport:knee.minLeft,minRightKneeSupport:knee.minRight,minLeftKneeWholeClip:l.length?Math.min(...l):null,minRightKneeWholeClip:r.length?Math.min(...r):null,supportPhases:knee.left.length+knee.right.length,partialSupportPhases:[...knee.left,...knee.right].filter(c=>c.partial).length,flightIntervals:flights.length,detectionBands:countBands(flights),cadenceSpm:gait.cadenceSpm,contactMsLeft:gait.contactMs.left,contactMsRight:gait.contactMs.right,contactAsymmetryPct:gait.asymmetry.contactPct,completeContacts:gait.completeContacts,manualCorrections:state.frames.reduce((n,f)=>n+(f.landmarks?.filter?.(p=>p?.manual).length||0),0)},flights,gait,detectionSource:DETECTION_SOURCE,supportKnee:{left:knee.left,right:knee.right},frames:state.frames.map(f=>({t:f.t,peopleCount:f.peopleCount,trackState:f.trackState,targetId:f.targetId??null,trackReason:f.trackReason??null,landmarks:f.landmarks,metrics:f.metrics}))};renderQuick();renderDiagnosis();renderReport();
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}
@@ -462,6 +462,7 @@ function saveRecord(){if(!state.report)return;try{const list=readRecords();list.
 const RECORD_COLUMNS=[
  ['date','日期',r=>r.settings?.date||(r.created||'').slice(0,10)],
  ['athlete','選手',r=>r.settings?.athlete||''],
+ ['captureMode','拍攝方式',r=>r.settings?.captureMode==='handheld'?'手持':r.settings?.captureMode==='tripod'?'固定':''],
  ['sampleFps','取樣fps',r=>r.settings?.sampleFps],
  ['continuity','連續率%',r=>r.summary?.continuity==null?null:r.summary.continuity*100],
  ['cadenceSpm','步頻',r=>r.summary?.cadenceSpm],
@@ -479,13 +480,16 @@ const cell=v=>v==null||v===''||Number.isNaN(v)?'—':(typeof v==='number'?(Math.
 // 所以是四張共用 x 軸的小圖，不是一張雙 y 軸的圖。雙軸會讓兩條線的交叉
 // 看起來像有意義，實際上只是兩個刻度湊巧對上。
 const SERIES_LEFT='#0d9488',SERIES_RIGHT='#7c3aed',SERIES_SOLO='#334155';
+// tripodOnly：這個量對機位敏感，手持與固定機位的偏差不同，混在一條線上
+// 會產生完全由機位造成的假趨勢。步頻與左右差異是時間比值，對機位寬容。
 const TREND_PANELS=[
  {title:'步頻',unit:'步/分',series:[{key:'cadenceSpm',label:'步頻',color:SERIES_SOLO}]},
  {title:'觸地時間',unit:'ms',series:[{key:'contactMsLeft',label:'左',color:SERIES_LEFT},
                                      {key:'contactMsRight',label:'右',color:SERIES_RIGHT}]},
  {title:'左右差異',unit:'%',series:[{key:'contactAsymmetryPct',label:'左右差異',color:SERIES_SOLO}]},
- {title:'支撐期最小膝角',unit:'°',series:[{key:'minLeftKneeSupport',label:'左',color:SERIES_LEFT},
-                                          {key:'minRightKneeSupport',label:'右',color:SERIES_RIGHT}]},
+ {title:'支撐期最小膝角',unit:'°',tripodOnly:true,
+  series:[{key:'minLeftKneeSupport',label:'左',color:SERIES_LEFT},
+          {key:'minRightKneeSupport',label:'右',color:SERIES_RIGHT}]},
 ];
 const PANEL_H=92,TREND_TOP=18,TREND_GAP=26,TREND_L=52,TREND_R=34,AXIS_H=30;
 const trendState={rows:[],hover:null};
@@ -506,7 +510,8 @@ function drawTrend(){
  if(!n)return;
  TREND_PANELS.forEach((panel,p)=>{
   const top=panelTop(p),bottom=top+PANEL_H;
-  const vals=panel.series.flatMap(sr=>rows.map(r=>r[sr.key]).filter(Number.isFinite));
+  const usable=r=>!(panel.tripodOnly&&r.handheld);
+  const vals=panel.series.flatMap(sr=>rows.map(r=>usable(r)?r[sr.key]:null).filter(Number.isFinite));
   c.font='11px system-ui';c.fillStyle='#0f172a';c.textAlign='left';
   c.fillText(`${panel.title}（${panel.unit}）`,TREND_L,top-6);
   if(!vals.length){c.fillStyle='#94a3b8';c.fillText('尚無資料',TREND_L,top+PANEL_H/2);return;}
@@ -520,12 +525,18 @@ function drawTrend(){
   c.textAlign='left';
   for(const sr of panel.series){
    c.strokeStyle=sr.color;c.lineWidth=2;c.beginPath();let started=false;
-   rows.forEach((r,i)=>{const v=r[sr.key];if(!Number.isFinite(v)){started=false;return;}
+   rows.forEach((r,i)=>{
+    // 被排除的場次（手持之於膝角）不是「量失敗」，是不屬於這條序列，
+    // 所以跨過去把可比的點接起來；真正缺值才斷線。
+    if(!usable(r))return;
+    const v=r[sr.key];if(!Number.isFinite(v)){started=false;return;}
     const px=trendX(i,n,w),py=y(v);started?c.lineTo(px,py):c.moveTo(px,py);started=true;});
    c.stroke();
-   rows.forEach((r,i)=>{const v=r[sr.key];if(!Number.isFinite(v))return;
+   rows.forEach((r,i)=>{const v=usable(r)?r[sr.key]:null;if(!Number.isFinite(v))return;
     const px=trendX(i,n,w),py=y(v);
-    c.beginPath();c.arc(px,py,4,0,Math.PI*2);
+    // 手持用方形、固定機位用圓形：形狀是次要編碼，色盲或黑白列印一樣分得出來
+    c.beginPath();
+    if(r.handheld)c.rect(px-3.6,py-3.6,7.2,7.2);else c.arc(px,py,4,0,Math.PI*2);
     // 連續率低的那一次，點畫成空心並鑲警示色：數字在，但別當成可靠的一點
     if(r.lowTrust){c.fillStyle='#fbfdff';c.fill();c.strokeStyle='#b45309';c.lineWidth=2;c.stroke();}
     else{c.fillStyle=sr.color;c.fill();c.strokeStyle='#fbfdff';c.lineWidth=2;c.stroke();}
@@ -560,6 +571,7 @@ function trendTooltip(i){
   +`<span>觸地 左 ${line('contactMsLeft','')} ／ 右 ${line('contactMsRight','')} ms</span>`
   +`<span>左右差異 ${line('contactAsymmetryPct','')}%</span>`
   +`<span>支撐期膝角 左 ${line('minLeftKneeSupport','')} ／ 右 ${line('minRightKneeSupport','')}°</span>`
+  +(r.handheld?'<span class="tipWarn">手持拍攝 · 膝角不列入趨勢</span>':'')
   +(r.lowTrust?'<span class="tipWarn">此次追蹤連續率偏低，數值不可靠</span>':'');
  $('trendTip').hidden=false;
 }
@@ -570,10 +582,14 @@ function buildTrend(list){
   contactMsRight:r.summary?.contactMsRight, contactAsymmetryPct:r.summary?.contactAsymmetryPct,
   minLeftKneeSupport:r.summary?.minLeftKneeSupport, minRightKneeSupport:r.summary?.minRightKneeSupport,
   lowTrust:Number.isFinite(r.summary?.continuity)&&r.summary.continuity<0.7,
+  handheld:r.settings?.captureMode==='handheld',
  }));
- const shaky=trendState.rows.filter(r=>r.lowTrust).length;
- $('trendNote').textContent=trendState.rows.length
-  ? `${trendState.rows.length} 次分析，由舊到新。`+(shaky?`其中 ${shaky} 次追蹤連續率低於 70%，以空心圈標示——那幾點的數值不可靠，不要拿來判斷趨勢。`:'四個量的尺度不同，所以分成四張共用時間軸的小圖，不是疊在一起。')
+ const shaky=trendState.rows.filter(r=>r.lowTrust).length,hand=trendState.rows.filter(r=>r.handheld).length;
+ $('trendNote').innerHTML=trendState.rows.length
+  ? `${trendState.rows.length} 次分析，由舊到新。`
+    +(hand?`手持拍攝 ${hand} 次，以方形標示；<strong>膝角那張圖不畫手持的點</strong>——離面角度造成的偏差會隨機位改變，混在一起會看到純粹由機位造成的假趨勢。`:'')
+    +(shaky?`其中 ${shaky} 次追蹤連續率低於 70%，以空心圈標示——那幾點的數值不可靠。`:'')
+    +(hand||shaky?'':'四個量的尺度不同，所以分成四張共用時間軸的小圖，不是疊在一起。')
   : '';
  drawTrend();
 }

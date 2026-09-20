@@ -9,7 +9,7 @@
 <main><section id="analyze" class="panel active"><div class="grid two">
 <article class="card controls"><h2>01 本次拍攝</h2><div class="formgrid">
 <label>選手<input id="athlete" placeholder="選手姓名或代號"></label><label>日期<input id="date" type="date"></label>
-<label>拍攝視角<select id="view"><option value="side-left">側面・左腳近鏡頭</option><option value="side-right">側面・右腳近鏡頭</option><option value="front">正面</option><option value="back">後面</option></select></label>
+<label>拍攝方式<select id="captureMode"><option value="tripod">固定機位（三腳架）</option><option value="handheld">手機隨拍（手持）</option></select></label><label>拍攝視角<select id="view"><option value="side-left">側面・左腳近鏡頭</option><option value="side-right">側面・右腳近鏡頭</option><option value="front">正面</option><option value="back">後面</option></select></label>
 <label>行進方向<select id="direction"><option value="right">畫面左 → 右</option><option value="left">畫面右 → 左</option></select></label>
 <label>影片 FPS<input id="fps" type="number" min="24" max="240" value="60"></label><p id="fpsNote" class="fpsNote">載入影片後會自動量測幀率。</p><label>分析取樣 FPS<input id="sampleFps" type="number" min="5" max="240" value="30"></label></div>
 <div class="switchrow"><label><input id="uncertaintyEnabled" type="checkbox" checked> 啟用角度誤差模擬</label><label>點位 σ <input id="sigmaPx" type="number" min="0" max="10" step="0.5" value="2"> px</label></div>
@@ -37,6 +37,23 @@
 <tr><td><strong>可證明的騰空區間</strong></td><td>雙腳同時離地、而且長度證明得出來的區段。</td><td><strong>沒有標記不等於沒有騰空</strong>，只代表這支影片證明不了。</td></tr>
 </tbody></table>
 <p class="muted">所有「支撐期」「騰空」的定義來自 World Athletics TR54；工具只量對應的物理量，不做判定。</p>
+</article>
+
+<article class="card prose"><h2>兩種拍法可以並用</h2>
+<p class="lead">手機隨拍和固定機位不衝突，但<strong>不能混在同一條趨勢線上</strong>——它們對機位的敏感度差很多。</p>
+<table><thead><tr><th>指標</th><th>手機隨拍</th><th>原因</th></tr></thead><tbody>
+<tr><td>步頻</td><td>✔ 可用</td><td>純時間量，與機位幾何無關</td></tr>
+<tr><td>左右差異 %</td><td>✔ 可用</td><td>是比值，兩腳同一機位量，誤差互相抵消</td></tr>
+<tr><td>觸地時間</td><td>△ 參考</td><td>絕對毫秒數受幀率與地面線估計影響</td></tr>
+<tr><td>支撐期膝角</td><td>✘ 不可混用</td><td>離面角度造成<strong>系統性</strong>偏差，機位一換偏差就變</td></tr>
+<tr><td>騰空偵測</td><td>✘ 不可用</td><td>手持讓地面線在片段內移動，觸地判定會崩</td></tr>
+</tbody></table>
+<p><strong>建議的兩層用法：</strong></p>
+<ul>
+<li><strong>固定機位</strong>（每週或每兩週）：三腳架、同一位置、同一距離。這是<strong>所有指標</strong>的基準線，包含膝角與騰空。</li>
+<li><strong>手機隨拍</strong>（日常）：隨時拍，只看<strong>步頻與左右差異</strong>。這兩項對機位寬容，而且正好是疲勞與單邊負荷最早出現的訊號。</li>
+</ul>
+<p class="muted">在「本次拍攝」選好拍攝方式，趨勢圖會把手持的點畫成方形，並且<strong>膝角那張圖不畫手持的點</strong>。混著看會看到一個完全由機位造成的上升或下降，那不是選手的變化。</p>
 </article>
 
 <article class="card prose"><h2>每天怎麼記錄</h2>

@@ -144,6 +144,21 @@ steps over clip length, which would count the incomplete cycles at each end. Bel
 complete contacts the panel says so instead of computing from one or two steps. The 10%
 asymmetry mark is a prompt to look, not a calibrated threshold.
 
+## Two capture modes, kept apart
+
+Ad-hoc phone filming and a tripod setup can both be useful, but not in the same trend
+line. Cadence and left/right asymmetry are timing quantities and ratios, largely
+indifferent to where the camera stands. Support-phase knee angle is not: off-sagittal
+placement biases it systematically, so a handheld session and a tripod session carry
+different systematic errors, and plotting them together produces a slope made entirely
+of camera placement.
+
+Each session records `captureMode`. Handheld points are drawn as squares rather than
+circles — a shape, so the distinction survives colourblindness and black-and-white
+printing — and the knee panel omits them altogether, connecting the comparable sessions
+across the gap, because an excluded session is not a failed measurement of that series.
+The caption says how many were left out and why.
+
 ## Trend chart
 
 Four measures on incompatible scales — cadence around 180, contact around 300 ms,
