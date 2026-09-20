@@ -2,6 +2,8 @@ import { bboxFromLandmarks, estimateGroundY, flightIntervals, supportKnee, compu
 import { LockedTarget, describePose, selectionCandidates, sampleAppearance, contentRect } from './target-lock.js?v=3.0.4';
 import { createPoseEngine } from './ai-loader.js?v=3.0.4';
 const $=id=>document.getElementById(id);
+const TOUCH=matchMedia('(pointer:coarse)').matches;
+const SELECT_HINT=TOUCH?'直接點一下選手就能指定':'點一下選手，或用「框選指定選手」拖出範圍';
 const state={landmarker:null,aiPromise:null,videoUrl:null,clickPoint:null,clickTime:0,frames:[],maxPeople:0,analyzing:false,stop:false,manual:false,report:null,lastTimestamp:0,version:'rw-3.0.4-target-lock',phase:'idle',lastError:null,phaseLog:[],previewPeople:[],previewTime:0,pendingTarget:null,targetSelection:null,runSelection:null,trackingStop:null,selectionIntent:null,selectionSerial:0,boxSelecting:false,draftBox:null,ignoreNextClick:false};
 const video=$('video'),overlay=$('overlay'),chart=$('chart'),octx=overlay.getContext('2d'),cctx=chart.getContext('2d');
 const LINKS=[[11,12],[11,23],[12,24],[23,24],[23,25],[25,27],[27,29],[29,31],[24,26],[26,28],[28,30],[30,32],[27,31],[28,32]];
@@ -70,7 +72,7 @@ function diagnostic(){return {schema:1,engine:state.version,created:new Date().t
 $('diagnosticBtn').onclick=()=>download('RaceWalk-3.0.4-diagnostic.json',JSON.stringify(diagnostic(),null,2),'application/json');
 $('startHereBtn').onclick=()=>analyze();
 $('scanPeopleBtn').onclick=()=>{if(state.analyzing)return;resetTarget();analyze(true);};
-$('clearTargetBtn').onclick=()=>{if(state.analyzing)return;resetTarget();$('clickHint').style.display='block';setPhase('idle','已解除指定；先前報告仍保留。請框選或辨識人物，再確認新目標。');updateControls();drawCurrent();};
+$('clearTargetBtn').onclick=()=>{if(state.analyzing)return;resetTarget();$('clickHint').style.display='block';$('clickHint').textContent=SELECT_HINT;setPhase('idle','已解除指定；先前報告仍保留。請框選或辨識人物，再確認新目標。');updateControls();drawCurrent();};
 async function waitForMedia(){
  if(video.error)throw new Error(`影片解碼錯誤 ${video.error.code}；請先確認此瀏覽器能播放原片`);
  if(video.readyState>=2&&video.videoWidth&&Number.isFinite(video.duration)&&video.duration>0)return;
@@ -143,7 +145,7 @@ async function detectAndFillFps(){
  updateControls();
 }
 video.addEventListener('loadedmetadata',()=>{syncCanvas();$('timeSlider').max=Number.isFinite(video.duration)?video.duration:0;mediaMessage(`影片資訊已讀取：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}；等待畫面解碼。`);updateControls();drawCurrent();detectAndFillFps().catch(()=>{$('fpsNote').textContent='幀率偵測失敗，請手動填寫。';});});
-video.addEventListener('loadeddata',()=>{clearTimeout(mediaTimer);mediaMessage(`影片已就緒：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}。`);$('clickHint').textContent='框選或點選目標，再確認縮圖';updateControls();drawCurrent();});
+video.addEventListener('loadeddata',()=>{clearTimeout(mediaTimer);mediaMessage(`影片已就緒：${video.videoWidth} × ${video.videoHeight}，${formatTime(video.duration)}。`);$('clickHint').textContent=SELECT_HINT;updateControls();drawCurrent();});
 video.addEventListener('canplay',updateControls);
 video.addEventListener('error',()=>{clearTimeout(mediaTimer);state.stop=true;mediaMessage(`影片解碼失敗（${video.error?.code??'?'}）。MOV/MP4 是容器；請確認影片能在此瀏覽器播放，必要時轉成 H.264 MP4，勿只改副檔名。`,true);updateControls();});
 video.addEventListener('timeupdate',()=>{$('timeSlider').value=video.currentTime;$('timeText').textContent=formatTime(video.currentTime);if(!state.analyzing)drawCurrent();});
@@ -170,12 +172,32 @@ overlay.addEventListener('pointercancel',()=>{dragStart=null;state.draftBox=null
 $('manualToggle').addEventListener('click',()=>{state.manual=!state.manual;$('manualToggle').textContent=`人工修點：${state.manual?'開':'關'}`;$('stage').classList.toggle('manual-active',state.manual);});
 $('showSkeleton').onchange=drawCurrent;$('showRefs').onchange=drawCurrent;$('showAllPeople').onchange=drawCurrent;$('groundSlider').oninput=()=>{drawCurrent();buildReport();};$('uncertaintyEnabled').onchange=recomputeAll;$('sigmaPx').onchange=recomputeAll;
 function seek(t){return new Promise((resolve,reject)=>{let timer;const clean=()=>{clearTimeout(timer);video.removeEventListener('seeked',check);video.removeEventListener('loadeddata',check);video.removeEventListener('canplay',check);video.removeEventListener('error',fail);};const fail=()=>{clean();reject(new Error('影片解碼失敗，無法讀取影格'));};const check=()=>{if(state.stop){clean();resolve();return;}if(!video.seeking&&Math.abs(video.currentTime-t)<.05&&video.readyState>=2){clean();resolve();}};video.addEventListener('seeked',check);video.addEventListener('loadeddata',check);video.addEventListener('canplay',check);video.addEventListener('error',fail);timer=setTimeout(()=>{clean();reject(new Error(`讀取 ${formatTime(t)} 影格逾時，請確認影片可播放`));},10000);try{if(Math.abs(video.currentTime-t)>.0005)video.currentTime=t;check();}catch(e){clean();reject(e);}});}
+// 手機上「頁面進入背景」太容易發生：螢幕自動變暗、跳出通知、切換 App
+// 都算。原本這裡直接丟例外中止整段分析，使用者看到的就是「自己停下來」。
+// 改成等它回到前景再繼續；等太久才放棄。
+const MAX_BACKGROUND_MS=120000;
+function waitForForeground(){
+ if(!document.hidden)return Promise.resolve();
+ $('status').textContent='已暫停：網頁在背景。回到前景會自動繼續分析。';
+ return new Promise((resolve,reject)=>{
+  const done=()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',onVis);};
+  const timer=setTimeout(()=>{done();reject(new Error('網頁在背景超過 2 分鐘，已停止分析'));},MAX_BACKGROUND_MS);
+  const onVis=()=>{if(!document.hidden){done();resolve();}};
+  document.addEventListener('visibilitychange',onVis);
+ });
+}
+const videoVisible=()=>{const r=video.getBoundingClientRect();
+ return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;};
 async function presentFrame(){
- if(document.hidden)throw new Error('網頁已進入背景，請回到前景後重新分析');
- const visible=()=>{const r=video.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;};if(!visible())video.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
- // WebKit may expose decoded metadata before presenting offscreen video pixels.
- await new Promise((resolve,reject)=>{let first=0,second=0,done=false;const finish=error=>{if(done)return;done=true;clearTimeout(timer);cancelAnimationFrame(first);cancelAnimationFrame(second);error?reject(error):resolve();};const timer=setTimeout(()=>finish(new Error('影片畫面未能呈現，請保持分析頁面在前景')),2000);first=requestAnimationFrame(()=>{second=requestAnimationFrame(()=>finish());});});
- if(document.hidden||!visible())throw new Error('影片不在可見範圍，請保持分析工作台開啟後重試');
+ // 捲動或短暫切到背景都只是暫時狀況，重試而不是中止。
+ for(let attempt=0;attempt<3;attempt++){
+  await waitForForeground();
+  if(!videoVisible())video.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+  // WebKit may expose decoded metadata before presenting offscreen video pixels.
+  await new Promise((resolve,reject)=>{let first=0,second=0,done=false;const finish=error=>{if(done)return;done=true;clearTimeout(timer);cancelAnimationFrame(first);cancelAnimationFrame(second);error?reject(error):resolve();};const timer=setTimeout(()=>finish(null),400);first=requestAnimationFrame(()=>{second=requestAnimationFrame(()=>finish(null));});});
+  if(!document.hidden&&videoVisible())return;
+ }
+ throw new Error('影片持續不在可見範圍，請保持分析工作台開啟後重試');
 }
 function metricsFor(f){return computeFrameMetrics(f,{uncertaintyEnabled:$('uncertaintyEnabled').checked,sigmaPx:+$('sigmaPx').value||0,width:video.videoWidth||1920,height:video.videoHeight||1080});}
 function recomputeAll(){state.frames.forEach(f=>f.metrics=metricsFor(f));buildReport();drawChart();drawCurrent();}

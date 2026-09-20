@@ -18,7 +18,7 @@
 <div class="actions"><button id="initAi" class="primary">載入 AI</button><button id="stopBtn" disabled>停止</button></div>
 <div class="progress"><div id="progressBar"></div></div><p id="mediaStatus" class="status" role="status">尚未匯入影片。</p><p id="status" class="status" role="status">正在啟動…</p></article>
 <article class="card viewerCard"><div class="viewerHead"><div><h2>02 Judge View</h2><small>框選指定選手 → 選縮圖並確認 → 開始鎖定分析。金色框為指定目標；灰色為其他偵測人物。</small></div><div class="metric"><span>目前/最多人物</span><strong id="personCount">0 / 0</strong></div></div>
-<div id="stage" class="stage"><video id="video" playsinline muted preload="auto" controls></video><canvas id="overlay"></canvas><div id="clickHint">框選或點選目標，再確認縮圖</div></div>
+<div id="stage" class="stage"><video id="video" playsinline muted preload="auto" controls></video><canvas id="overlay"></canvas><div id="clickHint">點一下選手就能指定</div></div>
 <div class="timeline"><input id="timeSlider" type="range" min="0" max="0" value="0" step="0.001"><span id="timeText">00:00.000</span></div>
 <div class="actions compact"><button id="playPause">播放 / 暫停</button><button id="prevFrame">◀ 1格</button><button id="nextFrame">1格 ▶</button><button id="manualToggle">人工修點：關</button><select id="manualJoint"><option value="25">左膝</option><option value="27">左踝</option><option value="23">左髖</option><option value="26">右膝</option><option value="28">右踝</option><option value="24">右髖</option></select></div>
 <div class="ground"><label>地面線 <input id="groundSlider" type="range" min="0.45" max="0.98" value="0.9" step="0.001"></label><span id="groundText">自動/待分析</span></div></article></div>
@@ -144,7 +144,7 @@
 
 <article class="card prose"><h2>指定選手的操作</h2>
 <ul>
-<li>在全身清楚的影格暫停，按「框選指定選手」拖曳框住整位選手。</li>
+<li><strong>直接點一下畫面裡的選手</strong>就能指定——手機上這是最好用的方式，不必拖曳。</li><li>畫面中人多或點不準時，改按「辨識目前畫面人物」，再點選縮圖。</li><li>需要精確範圍時才用「框選指定選手」拖曳框住整位選手。</li>
 <li>點選人物縮圖，核對金色框，再按「確認這位選手」和「開始鎖定分析」。只有一位候選也必須確認。</li>
 <li>更改起始影格須重新指定。失聯、軀幹重疊或配對不明確時停止取值，但繼續掃描整段；短暫失聯須連續三格核對才恢復，長時間失聯需重新指定。</li>
 <li>追蹤標籤不是身分保證；相似衣著、遮擋、快速移動仍須回看原片。</li>

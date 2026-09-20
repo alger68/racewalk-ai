@@ -103,6 +103,16 @@ to that moment.
 None of the shading is a verdict. The support-phase minimum is the number TR54 talks
 about; whether it constitutes a bent knee is a judgment this tool does not make.
 
+## Analysis survives the screen going dark
+
+`presentFrame` used to throw the moment `document.hidden` became true. On a phone that
+is not an edge case: the screen dimming, a notification, or a glance at another app all
+set it, and a fifteen-second analysis died partway through with no obvious cause —
+reported as "it stops by itself". It now waits for the page to return to the foreground
+and carries on, says so in the status line while it waits, and gives up only after two
+minutes hidden. The same applies to the video scrolling out of view: it scrolls back and
+retries rather than aborting.
+
 ## Frame rate is measured, not declared
 
 Sampling is clamped to the video's frame rate, since sampling above the source only
