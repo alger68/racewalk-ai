@@ -390,6 +390,13 @@ function buildReport(){
 }
 function countBands(flights){const m={};for(const b of DETECTION_BANDS)m[b.band]=0;for(const f of flights){if(f.detection)m[f.detection.band]=(m[f.detection.band]||0)+1;}return m;}
 function bandLabel(b){return DETECTION_BANDS.find(x=>x.band===b)?.label||b;}
+function seekAndShow(t){
+ if(state.analyzing||!Number.isFinite(t))return;
+ video.currentTime=t;
+ document.querySelector('.tab[data-tab="analyze"]')?.click();
+ $('stage')?.scrollIntoView({block:'center',behavior:'smooth'});
+ drawCurrent();
+}
 function renderQuick(){if(!state.report)return;const s=state.report.summary;
  const findings=diagnoseCapture(state.report),hit=affectedMetrics(findings);
  const blockers=findings.filter(f=>f.level==='blocker').length,warns=findings.filter(f=>f.level==='warn').length;
@@ -417,11 +424,11 @@ function renderQuick(){if(!state.report)return;const s=state.report.summary;
  $('quickTarget').textContent=`指定選手 ${state.report.targetSelection?.id||'—'} · 取樣 ${state.report.settings?.sampleFps??'—'} fps · ${s.frames} 格`;
  $('events').innerHTML=(()=>{
   const all=state.report.flights||[],provable=all.filter(e=>e.lowerMs>0),weak=all.length-provable.length;
-  const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · <strong>至少 ${e.lowerMs.toFixed(0)} ms</strong>${Number.isFinite(e.estimateMs)?` <em class="estimate">估計 ${e.estimateMs.toFixed(0)} ms</em>`:''}${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">複查</button></div>`).join('');
+  const rows=provable.map((e,i)=>`<div class="event"><span>疑似雙腳離地 #${i+1} · ${formatTime(e.startTime)}–${formatTime(e.endTime)} · <strong>至少 ${e.lowerMs.toFixed(0)} ms</strong>${Number.isFinite(e.estimateMs)?` <em class="estimate">估計 ${e.estimateMs.toFixed(0)} ms</em>`:''}${e.detection?` · ${escapeHtml(e.detection.label)}`:''}</span><button data-seek="${e.startTime}">跳到這裡看</button></div>`).join('');
   const note=(weak?`<p class="muted">另有 ${weak} 段只觀察到單格離地，下界為 0，證明不了任何長度，因此不列為事件。</p>`:'')
    +(provable.some(e=>Number.isFinite(e.estimateMs))?'<p class="muted"><strong>粗體是嚴謹下界</strong>：真實騰空一定不短於它。「估計」是兩端做次影格內插的結果，較接近真值但<strong>系統性偏低</strong>（門檻帶有寬度，兩端各吃掉一段），而且提高幀率不會讓這個偏差消失。判定只採信下界。</p>':'');
   return rows?rows+note:`<p class="muted">未標記可證明的雙腳離地；這是「沒有證明」，不是「沒有騰空」。${weak?`（有 ${weak} 段單格觀測不構成證據。）`:''}</p>`;
-})();document.querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>{if(!state.analyzing)video.currentTime=+b.dataset.seek;});}
+})();$('events').querySelectorAll('[data-seek]').forEach(b=>b.onclick=()=>seekAndShow(+b.dataset.seek));}
 function coachStat(k,v,unit,level){
  return `<div class="coachStat${level?' '+level:''}"><span>${k}</span><strong>${v}</strong><i>${unit}</i></div>`;}
 function stat(k,v,level){
@@ -442,12 +449,7 @@ function renderDiagnosis(){
   '</div>').join('')}`+
   '<p class="muted">上列門檻是拍攝條件的合理性檢查，不是 TR54 判準，也未經實拍校準。<button type="button" class="linklike" id="toGuide">開啟拍攝指南</button></p>';
  const go=$('toGuide');if(go)go.onclick=()=>document.querySelector('.tab[data-tab="guide"]')?.click();
- box.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>{
-  if(state.analyzing)return;
-  video.currentTime=+b.dataset.goto;
-  document.querySelector('.tab[data-tab="analyze"]')?.click();
-  $('stage')?.scrollIntoView({block:'center',behavior:'smooth'});
- });
+ box.querySelectorAll('[data-goto]').forEach(b=>b.onclick=()=>seekAndShow(+b.dataset.goto));
 }
 function renderReport(){if(!state.report){$('reportBody').innerHTML='<p>完成分析後會產生本次報告。</p>';return;}const r=state.report,s=r.summary;$('reportBody').innerHTML=`<h3>${escapeHtml(r.settings.athlete)} · ${r.settings.date}</h3><p><strong>指定選手：${escapeHtml(r.targetSelection?.id||'未記錄')}</strong> ｜ 起始影格 ${formatTime(r.targetSelection?.time)} ｜ ${r.trackingStop?'追蹤不確定，已暫停；不是完整分析':'使用者已確認目標'}。追蹤標籤不是身分保證，請核對原片。</p><p>引擎：${r.engine} ｜ 取樣 ${r.settings.sampleFps} fps ｜ 誤差模擬 ${r.settings.uncertaintyEnabled?`開啟（σ=${r.settings.pointSigmaPx}px）`:'關閉'}</p><table><tr><th>指標</th><th>結果</th></tr><tr><td>追蹤連續率</td><td>${(s.continuity*100).toFixed(1)}%</td></tr><tr><td>最多同框人物</td><td>${s.maxPeople}</td></tr><tr><td>左膝支撐期最小角</td><td>${num(s.minLeftKneeSupport)}°</td></tr><tr><td>右膝支撐期最小角</td><td>${num(s.minRightKneeSupport)}°</td></tr><tr><td>支撐期數（其中未涵蓋垂直位置）</td><td>${s.supportPhases}（${s.partialSupportPhases}）</td></tr><tr><td>整段最小膝角（含擺動期，非 TR54 判準）</td><td>${num(s.minLeftKneeWholeClip)}° / ${num(s.minRightKneeWholeClip)}°</td></tr><tr><td>疑似雙腳離地區間</td><td>${s.flightIntervals}</td></tr><tr><td>依文獻偵測分帶（依 lowerMs）</td><td>${DETECTION_BANDS.map(b=>`${b.label}：${s.detectionBands?.[b.band]??0}`).join('｜')}</td></tr><tr><td>人工修正點數</td><td>${s.manualCorrections}</td></tr></table><p class="muted">支撐期最小角只取「觸地到通過垂直位置」這段，也就是 TR54 彎膝規則規範的範圍；擺動期彎膝屬正常動作，不列入。若該次觸地期間髖未通過踝的正上方（選手提前出框），該次退回用整段觸地期並計入括號內的數量，涵蓋範圍比規則規定的大。非矢狀面拍攝會讓量到的角度偏小。AI 僅提供篩查與複查證據，不輸出正式犯規判決。</p><p class="muted">偵測分帶不是判定，是「這種長度的騰空，文獻說裁判看不看得見」。分帶只編碼兩個文獻錨點，中間不插值；且套用在嚴謹下界 lowerMs 上，所以偏保守。本工具尚未對照裁判紅卡校準。出處：${escapeHtml(DETECTION_SOURCE)}</p>`;}
 $('monkeyBtn').onclick=()=>{try{const r=runMonkeyCore(1000);$('monkeyResult').textContent=`PASS\n${r.passed}/${r.iterations} invariants passed\nangle range / uncertainty containment OK\n此為核心隨機測試，不是影片準確度驗證。`;}catch(e){$('monkeyResult').textContent='FAIL\n'+e.stack;}};
