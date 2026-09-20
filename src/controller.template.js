@@ -106,24 +106,33 @@ $('videoInput').addEventListener('change',e=>{
 // 影片幀率是手填欄位，沒人會記得改。取樣率被夾在這個值以內，
 // 所以填錯的代價是「用 240fps 拍的片子被當成 60fps 分析」——
 // 正好懲罰拍攝做對的人。量一次，填進去，並且講出來。
-async function measureFps(){
- if(state.analyzing||!video.requestVideoFrameCallback)return null;
- const t0=video.currentTime,wasMuted=video.muted;
+async function measureFps(url){
+ // 在隱藏的副本上量，不要動主播放器。量測需要播放，播了主播放器就會
+ // 在載入後自己跑兩秒再跳回去——使用者看得到，而且任何當下讀取播放位置的
+ // 程式都會讀到錯的值。這是實際發生過的回歸。
+ if(!url||!('requestVideoFrameCallback' in HTMLVideoElement.prototype))return null;
+ const probe=document.createElement('video');
+ probe.muted=true;probe.playsInline=true;probe.preload='auto';probe.src=url;
  try{
-  video.muted=true;
+  await new Promise((resolve,reject)=>{
+   probe.addEventListener('loadedmetadata',resolve,{once:true});
+   probe.addEventListener('error',()=>reject(new Error('probe load failed')),{once:true});
+   setTimeout(()=>reject(new Error('probe timeout')),8000);
+  });
   const times=await new Promise(resolve=>{
    const got=[],deadline=setTimeout(()=>resolve(got),1800);
    const tick=(_,meta)=>{got.push(meta.mediaTime);
     if(got.length>=40){clearTimeout(deadline);resolve(got);return;}
-    video.requestVideoFrameCallback(tick);};
-   video.requestVideoFrameCallback(tick);
-   video.play().catch(()=>{clearTimeout(deadline);resolve(got);});
+    probe.requestVideoFrameCallback(tick);};
+   probe.requestVideoFrameCallback(tick);
+   probe.play().catch(()=>{clearTimeout(deadline);resolve(got);});
   });
   return snapFps(medianFps(times));
- }finally{video.pause();video.muted=wasMuted;try{video.currentTime=t0;}catch{}}
+ }catch{return null;}
+ finally{try{probe.pause();probe.removeAttribute('src');probe.load();}catch{}}
 }
 async function detectAndFillFps(){
- const fps=await measureFps();
+ const fps=await measureFps(state.videoUrl);
  if(fps==null){$('fpsNote').textContent='無法自動偵測幀率，請依拍攝設定手動填寫。';return;}
  const field=+$('fps').value||0;
  $('fps').value=fps;

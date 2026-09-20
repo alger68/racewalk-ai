@@ -64,6 +64,12 @@ def main():
         page.wait_for_function(
             "/偵測到|失敗|無法/.test(document.querySelector('#fpsNote').textContent)", timeout=30000)
 
+        # 量測期間主播放器不得被動到。先前的版本在主播放器上播放再還原，
+        # 使用者會看到影片自己跑兩秒，而載入後立刻讀取播放位置的程式會讀到錯的值。
+        moved = page.evaluate("document.querySelector('#video').currentTime")
+        check('量測期間主播放器沒有被移動', moved <= 0.05, f'currentTime={moved}')
+        check('量測期間主播放器沒有被播放', page.evaluate("document.querySelector('#video').paused"))
+
         note = page.inner_text('#fpsNote')
         check('量到了幀率而不是放棄', '偵測到' in note, note)
         measured = float(page.input_value('#fps'))
